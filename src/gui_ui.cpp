@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <fstream>
+#include <unordered_set>
 
 // ---------------------------------------------------------------
 // Widget globals
@@ -17,6 +19,27 @@ static GtkTextBuffer* g_log_buf       = nullptr;
 static GtkTextView*   g_log_view      = nullptr;
 static AppCore*       g_core          = nullptr;
 static int            g_num_channels  = 0;
+static GtkWidget*     g_nim_entry     = nullptr;
+
+// CSV NIM data
+static std::unordered_set<std::string> g_nim_set;
+
+static void loadCSV(const std::string& path) {
+    g_nim_set.clear();
+    std::ifstream f(path);
+    if (!f.is_open()) return;
+    std::string line;
+    std::getline(f, line); // skip header
+    while (std::getline(f, line)) {
+        if (line.empty()) continue;
+        std::string nim = line.substr(0, line.find(';'));
+        if (!nim.empty()) g_nim_set.insert(nim);
+    }
+}
+
+static bool findNIM(const std::string& nim) {
+    return g_nim_set.count(nim) > 0;
+}
 
 static const char* CSS =
     ".indicator-on  { background-color: #2ecc71; color: white; border-radius:8px;"
@@ -303,8 +326,75 @@ static void onChannelOff(GtkButton*, gpointer data) {
 }
 
 // ---------------------------------------------------------------
+// NIM search + relay CH1 toggle
+// ---------------------------------------------------------------
+static void onNIMActivate(GtkEntry* entry, gpointer) {
+    const gchar* raw = gtk_entry_get_text(entry);
+    std::string text(raw);
+
+    // Split by '+', ambil index 0
+    std::string nim = text.substr(0, text.find('+'));
+    // Trim whitespace
+    while (!nim.empty() && (nim.front() == ' ' || nim.front() == '\r'))
+        nim.erase(nim.begin());
+    while (!nim.empty() && (nim.back() == ' ' || nim.back() == '\r'))
+        nim.pop_back();
+
+    if (nim.empty()) {
+        appendLog("[NIM] Input kosong.");
+        return;
+    }
+
+    appendLog("[NIM] Cari: " + nim);
+
+    if (!findNIM(nim)) {
+        appendLog("[NIM] Tidak ditemukan: " + nim);
+        gtk_entry_set_text(entry, "");
+        return;
+    }
+
+    appendLog("[NIM] Ditemukan: " + nim);
+
+    if (!g_core->isRelayConnected()) {
+        appendLog("[!] Relay tidak terhubung.");
+        gtk_entry_set_text(entry, "");
+        return;
+    }
+
+    // Toggle CH1: cek bit 0 dari status
+    uint8_t status = g_core->getRelayStatus();
+    bool ch1_on    = (status & 0x01) != 0;
+    bool new_state = !ch1_on;
+
+    if (g_core->setRelay(1, new_state))
+        appendLog(std::string("[Relay] CH1 toggle -> ") + (new_state ? "ON" : "OFF"));
+    else
+        appendLog("[!] Gagal toggle CH1.");
+
+    gtk_entry_set_text(entry, "");
+}
+
+// ---------------------------------------------------------------
 // Bangun UI
 // ---------------------------------------------------------------
+static GtkWidget* buildNIMPanel() {
+    GtkWidget* frame = gtk_frame_new("Cari NIM");
+    GtkWidget* hbox  = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(hbox), 8);
+    gtk_container_add(GTK_CONTAINER(frame), hbox);
+
+    GtkWidget* lbl = gtk_label_new("NIM / Scan:");
+    g_nim_entry    = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(g_nim_entry), "Scan atau ketik NIM lalu Enter...");
+    gtk_widget_set_hexpand(g_nim_entry, TRUE);
+
+    g_signal_connect(g_nim_entry, "activate", G_CALLBACK(onNIMActivate), nullptr);
+
+    gtk_box_pack_start(GTK_BOX(hbox), lbl,          FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(hbox), g_nim_entry,  TRUE,  TRUE,  0);
+    return frame;
+}
+
 static GtkWidget* buildRelayPanel() {
     GtkWidget* frame = gtk_frame_new("Kontrol Relay");
     GtkWidget* vbox  = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -420,12 +510,15 @@ void run_gui(AppCore& core, int argc, char* argv[]) {
     gtk_box_pack_start(GTK_BOX(hbox_top), buildRelayPanel(), TRUE,  TRUE,  0);
     gtk_box_pack_start(GTK_BOX(hbox_top), buildUSBPanel(),   FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(vbox_main), hbox_top,         TRUE,  TRUE,  0);
+    gtk_box_pack_start(GTK_BOX(vbox_main), buildNIMPanel(),  FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(vbox_main), buildLogPanel(),  FALSE, FALSE, 0);
 
     gtk_widget_show_all(g_window);
 
     updateUSBList();
     appendLog("[*] USB Relay Auto-Control dimulai.");
+    loadCSV("data.csv");
+    appendLog("[*] CSV dimuat: " + std::to_string(g_nim_set.size()) + " NIM.");
 
     // Coba langsung, kalau gagal mulai scan loop 5 detik
     tryAutoConnect();
