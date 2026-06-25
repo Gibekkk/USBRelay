@@ -44,6 +44,7 @@ public:
     bool                    isRelayConnected() const;
     RelayInfo               getRelayInfo() const;
     DeviceMapper&           getMapper() { return m_mapper; }
+    std::vector<std::string> scanRelayStatus();
 
     void setEventCallback(EventCb cb);
     bool pollEvent(AppEvent& ev);

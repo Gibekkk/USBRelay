@@ -33,9 +33,15 @@ public:
     uint8_t getStatus();
     void setLastStatus(uint8_t s);
 
+    // Scan semua metode baca, return log string, update m_last_status
+    std::vector<std::string> scanStatus();
+
 private:
+    uint8_t tryReadMethod(int method, std::string& label);
+
     hid_device* m_device      = nullptr;
     RelayInfo   m_info;
     bool        m_initialized = false;
     uint8_t     m_last_status = 0;
+    int         m_status_method = -1; // metode yang berhasil
 };

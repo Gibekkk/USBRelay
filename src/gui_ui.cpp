@@ -263,10 +263,15 @@ static gboolean onEventIdle(gpointer user_data) {
         RelayInfo info = g_core->getRelayInfo();
         std::string name = info.serial.empty() ? info.path : info.serial;
         setConnectedUI(name, info.num_channels);
-        updateRelayStatus(ev.relay_status);
         appendLog("[+] Relay terhubung: " + name +
                   "  ch=" + std::to_string(info.num_channels) +
                   "  path=" + info.path);
+
+        // Scan semua metode baca, log hasilnya, update status UI
+        auto scanLogs = g_core->scanRelayStatus();
+        for (auto& l : scanLogs) appendLog(l);
+        updateRelayStatus(g_core->getRelayStatus());
+
         startStatusPoll();
         break;
     }

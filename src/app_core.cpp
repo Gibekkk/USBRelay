@@ -89,6 +89,11 @@ bool AppCore::setAll(bool on) {
     return true;
 }
 
+std::vector<std::string> AppCore::scanRelayStatus() {
+    std::lock_guard<std::mutex> lk(m_relayMtx);
+    return m_relay.scanStatus();
+}
+
 std::vector<RelayInfo>  AppCore::getRelayDevices()       { return m_relay.enumerate(); }
 std::vector<USBDevice>  AppCore::getUSBDevices()          { return m_monitor.getConnectedDevices(); }
 bool                    AppCore::isRelayConnected() const  { return m_relay.isOpen(); }
