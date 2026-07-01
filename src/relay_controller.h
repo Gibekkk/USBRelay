@@ -25,6 +25,13 @@ public:
     bool openDevice(const std::string& path);
     void closeDevice();
 
+    // Override manual jumlah channel. Deteksi otomatis dari serial/product
+    // string HID TIDAK bisa diandalkan untuk semua board clone 16c0:05df
+    // (banyak board tidak menaruh info jumlah channel di string itu sama
+    // sekali). Kalau di-set > 0, nilai ini yang dipakai, bukan hasil tebakan
+    // enumerate(). Lihat config/Relay.conf.
+    void setChannelCountOverride(int n) { m_channel_override = n; }
+
     bool isOpen() const { return m_device != nullptr; }
     RelayInfo getInfo() const { return m_info; }
 
@@ -44,4 +51,5 @@ private:
     bool        m_initialized = false;
     uint8_t     m_last_status = 0;
     int         m_status_method = -1; // metode yang berhasil
+    int         m_channel_override = 0; // 0 = pakai hasil auto-detect enumerate()
 };

@@ -37,6 +37,7 @@ public:
     void disconnectRelay();
     bool setRelay(int ch, bool on);
     bool setAll(bool on);
+    void setChannelCountOverride(int n) { m_relay.setChannelCountOverride(n); }
 
     std::vector<RelayInfo>  getRelayDevices();
     std::vector<USBDevice>  getUSBDevices();

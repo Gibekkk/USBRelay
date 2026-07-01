@@ -47,6 +47,12 @@ std::vector<RelayInfo> RelayController::enumerate() {
         if (info.num_channels <= 0)
             info.num_channels = 1;
 
+        // Auto-detect dari serial/product string tidak bisa diandalkan
+        // untuk semua board clone. Kalau user sudah set override manual
+        // (config/Relay.conf), pakai itu -> lebih akurat & konsisten.
+        if (m_channel_override > 0)
+            info.num_channels = m_channel_override;
+
         result.push_back(info);
     }
     hid_free_enumeration(devs);
@@ -196,6 +202,13 @@ std::vector<std::string> RelayController::scanStatus() {
 
     // Pilih metode terbaik: res > 0, dan jika m_status_method sudah diset pakai itu
     // Kandidat byte status: index 6, 7, 8
+    // CATATAN: byte hasil decode di sini HANYA untuk log/diagnostik &
+    // menentukan metode baca mana yang direspons device (dipakai getStatus()
+    // untuk cek device masih hidup/tidak). TIDAK dipakai untuk menimpa
+    // m_last_status, karena decode bitmask ini terbukti tidak reliable
+    // untuk sebagian board multi-channel (CH1 kebetulan cocok, CH2+ tidak).
+    // m_last_status yang jadi acuan tetap dari software (setChannel/setAll),
+    // direkonsiliasi ulang dari usage.csv oleh pemanggil setelah connect.
     uint8_t best_status = m_last_status;
     int     best_method = -1;
 
@@ -222,14 +235,12 @@ std::vector<std::string> RelayController::scanStatus() {
 
     if (best_method >= 0) {
         m_status_method = best_method;
-        m_last_status   = best_status;
+        // m_last_status SENGAJA tidak ditimpa oleh best_status (lihat catatan di atas)
         std::ostringstream ss;
-        ss << "[scan] Pakai M" << best_method
-           << " -> status=0x" << std::hex << std::setw(2) << std::setfill('0')
-           << (int)best_status << " (bits: ";
-        for (int i = 7; i >= 0; i--)
-            ss << ((best_status >> i) & 1);
-        ss << ")";
+        ss << "[scan] Metode baca yang dipakai: M" << best_method
+           << " (raw decode 0x" << std::hex << std::setw(2) << std::setfill('0')
+           << (int)best_status << std::dec << ", hanya untuk cek koneksi)"
+           << " -- status channel sebenarnya mengikuti catatan software.";
         logs.push_back(ss.str());
     } else {
         logs.push_back("[scan] Semua metode gagal / timeout.");
@@ -290,7 +301,21 @@ bool RelayController::setAll(bool on) {
 uint8_t RelayController::getStatus() {
     if (!m_device) return m_last_status;
 
-    // Gunakan metode yang sudah diketahui bekerja dari scanStatus()
+    // ---------------------------------------------------------------
+    // PENTING: kita TIDAK lagi menimpa m_last_status dengan hasil decode
+    // byte mentah dari hardware di sini. Banyak board clone 16c0:05df
+    // (termasuk board 4-channel) tidak mengembalikan bitmask multi-channel
+    // yang konsisten lewat metode baca manapun (hid_get_feature_report /
+    // hid_read_timeout) — dulu ini yang bikin CH1 kebetulan kebaca benar
+    // tapi CH2-CH4 salah. Status channel yang kita percayai adalah state
+    // yang KITA sendiri kirim & catat lewat setChannel()/setAll()
+    // (m_last_status), yang direkonsiliasi ulang saat konek (lihat
+    // gui_ui.cpp: reasserted dari usage.csv).
+    //
+    // Pembacaan hardware di bawah ini HANYA dipakai untuk mendeteksi
+    // apakah device masih hidup/terhubung (write/read gagal = dianggap
+    // lepas), bukan untuk menentukan status channel mana yang ON/OFF.
+    // ---------------------------------------------------------------
     if (m_status_method < 0) {
         // Belum scan, return cache
         return m_last_status;
@@ -320,13 +345,11 @@ uint8_t RelayController::getStatus() {
     if (res < 0) {
         hid_close(m_device);
         m_device = nullptr;
-        return m_last_status;
     }
 
-    if (res >= 9)      m_last_status = buf[8];
-    else if (res >= 8) m_last_status = buf[7];
-    else if (res >= 7) m_last_status = buf[6];
-
+    // res >= 0 berarti device masih merespons -> tetap terhubung.
+    // Status channel dikembalikan dari cache software (m_last_status),
+    // bukan dari decode buf di atas.
     return m_last_status;
 }
 
