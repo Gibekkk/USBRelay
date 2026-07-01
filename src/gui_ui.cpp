@@ -218,21 +218,17 @@ static const char* CSS =
     ".relay-connected    { color: #27ae60; font-weight: bold; }"
     ".relay-disconnected { color: #c0392b; font-weight: bold; }"
     ".relay-scanning     { color: #f39c12; font-weight: bold; }"
-    // Tombol channel: default = inactive (abu-abu)
     ".channel-btn { min-width: 84px; min-height: 64px; font-size: 15px;"
     "               font-weight: bold; border-radius: 10px; padding: 4px;"
-    "               background-color: #95a5a6; color: #2c3e50;"
-    "               border: 2px solid #7f8c8d; }"
-    ".channel-btn:hover { background-color: #a9b3b4; }"
-    // Selected = channel OFF tapi dipilih untuk scan berikutnya (biru)
-    ".channel-selected { background-color: #2980b9; color: #ffffff;"
-    "                    border: 2px solid #1c5980; }"
-    ".channel-selected:hover { background-color: #3491ce; }"
-    // Active = channel sedang ON (hijau), tidak bisa dipilih -> insensitive.
-    // opacity dipaksa 1 supaya warnanya tetap penuh walau tombolnya
-    // insensitive (tema GTK biasanya memudarkan widget insensitive).
-    ".channel-active { background-color: #27ae60; color: #ffffff;"
-    "                  border: 2px solid #1e8449; }"
+    "               background-image: linear-gradient(rgba(149,165,166,0.78), rgba(149,165,166,0.78)), url(\"silentbox.png\");"
+    "               background-size: cover; background-position: center; background-repeat: no-repeat;"
+    "               color: #2c3e50; border: 2px solid #7f8c8d; }"
+    ".channel-btn:hover { background-image: linear-gradient(rgba(169,179,180,0.78), rgba(169,179,180,0.78)), url(\"silentbox.png\"); }"
+    ".channel-selected { background-image: linear-gradient(rgba(41,128,185,0.80), rgba(41,128,185,0.80)), url(\"silentbox.png\");"
+    "                    color: #ffffff; border: 2px solid #1c5980; }"
+    ".channel-selected:hover { background-image: linear-gradient(rgba(52,145,206,0.80), rgba(52,145,206,0.80)), url(\"silentbox.png\"); }"
+    ".channel-active { background-image: linear-gradient(rgba(39,174,96,0.80), rgba(39,174,96,0.80)), url(\"silentbox.png\");"
+    "                  color: #ffffff; border: 2px solid #1e8449; }"
     ".channel-btn:disabled { opacity: 1; }";
 
 static void applyCSS() {
