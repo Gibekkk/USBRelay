@@ -2,9 +2,75 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
+#include <cctype>
 
 RelayController::RelayController() = default;
 RelayController::~RelayController() { closeDevice(); cleanup(); }
+
+// ---------------------------------------------------------------
+// Deteksi jumlah channel — MURNI dari teks (serial/product string HID).
+//
+// CATATAN JUJUR: device HID generic 16c0:05df (dan clone-nya) TIDAK
+// pernah mengekspos jumlah channel lewat descriptor atau feature report
+// -- field itu memang tidak ada di protokolnya sama sekali. Tidak ada
+// cara membaca "jumlah relay" langsung dari hardware. Semua di bawah
+// ini adalah heuristik bertingkat dari string, diurutkan dari yang
+// paling bisa dipercaya ke yang paling lemah. Kalau semua gagal,
+// fallback ke 1 channel (aman, tombolnya tetap bisa ditambah manual
+// via override kalau device ternyata >1 channel dan string-nya memang
+// tidak mengandung petunjuk apa pun).
+// ---------------------------------------------------------------
+
+// Layer kuat: cari pola eksplisit "...relay<N>", "...lcus-<N>", "...ch<N>"
+// (case-insensitive) di dalam teks. Ini sinyal paling bisa dipercaya karena
+// nama produk/serial memang sengaja mengandung angka channel.
+static int patternChannels(const std::string& text) {
+    if (text.empty()) return 0;
+    std::string lower(text.size(), '\0');
+    std::transform(text.begin(), text.end(), lower.begin(),
+                    [](unsigned char c) { return (char)std::tolower(c); });
+
+    static const char* kKeywords[] = { "relay", "lcus-", "lcus", "ch" };
+    for (const char* kw : kKeywords) {
+        size_t kwLen = std::strlen(kw);
+        size_t pos = 0;
+        while ((pos = lower.find(kw, pos)) != std::string::npos) {
+            size_t digitPos = pos + kwLen;
+            // izinkan satu karakter pemisah non-digit seperti '-' atau '_'
+            if (digitPos < text.size() && !std::isdigit((unsigned char)text[digitPos]))
+                digitPos++;
+            if (digitPos < text.size() &&
+                text[digitPos] >= '1' && text[digitPos] <= '8') {
+                return text[digitPos] - '0';
+            }
+            pos += kwLen;
+        }
+    }
+    return 0;
+}
+
+// Layer lemah: ambil digit 1-8 terakhir yang muncul di dalam teks.
+// Ini konvensi firmware dcttech asli (serial 5 karakter, posisi terakhir
+// = jumlah channel), tapi untuk board clone dengan serial acak bisa
+// salah kalau kebetulan ada digit 1-8 yang tidak berarti apa-apa.
+static int lastDigitChannels(const std::string& text) {
+    for (int i = (int)text.size() - 1; i >= 0; i--) {
+        if (text[i] >= '1' && text[i] <= '8') return text[i] - '0';
+    }
+    return 0;
+}
+
+// Gabungkan semua layer di atas untuk satu device, urut dari yang paling
+// dipercaya. Return 0 kalau benar-benar tidak ada petunjuk sama sekali.
+static int guessChannelCount(const std::string& serial, const std::string& product) {
+    int guess = 0;
+    if (guess <= 0) guess = patternChannels(product);   // "USBRelay4", "LCUS-2" dst -> paling kuat
+    if (guess <= 0) guess = patternChannels(serial);
+    if (guess <= 0) guess = lastDigitChannels(serial);  // konvensi firmware dcttech asli
+    if (guess <= 0) guess = lastDigitChannels(product);
+    return guess;
+}
 
 bool RelayController::init() {
     if (hid_init() < 0) return false;
@@ -28,28 +94,19 @@ std::vector<RelayInfo> RelayController::enumerate() {
             info.serial.assign(ws.begin(), ws.end());
         }
 
-        if (info.serial.size() >= 5) {
-            char c = info.serial[4];
-            if (c >= '1' && c <= '8')
-                info.num_channels = c - '0';
+        std::string product;
+        if (d->product_string) {
+            std::wstring w(d->product_string);
+            product.assign(w.begin(), w.end());
         }
 
-        if (info.num_channels <= 0 && d->product_string) {
-            std::wstring prod(d->product_string);
-            for (int i = (int)prod.size() - 1; i >= 0; i--) {
-                if (prod[i] >= L'1' && prod[i] <= L'8') {
-                    info.num_channels = prod[i] - L'0';
-                    break;
-                }
-            }
-        }
+        int guessed = guessChannelCount(info.serial, product);
+        info.num_channels = (guessed > 0) ? guessed : 1;
 
-        if (info.num_channels <= 0)
-            info.num_channels = 1;
-
-        // Auto-detect dari serial/product string tidak bisa diandalkan
-        // untuk semua board clone. Kalau user sudah set override manual
-        // (config/Relay.conf), pakai itu -> lebih akurat & konsisten.
+        // Override manual (opsional, lewat --channels N di command line,
+        // BUKAN file config statis) tetap menang kalau di-set -- untuk
+        // kasus langka di mana serial/product benar-benar tidak
+        // mengandung petunjuk apa pun.
         if (m_channel_override > 0)
             info.num_channels = m_channel_override;
 

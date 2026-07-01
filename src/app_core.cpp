@@ -6,34 +6,6 @@
 #include <cctype>
 #include <cstdlib>
 
-// ---------------------------------------------------------------
-// Baca override jumlah channel relay dari config/Relay.conf (opsional).
-// Auto-detect dari serial/product string HID (relay_controller.cpp) TIDAK
-// bisa diandalkan untuk semua board clone 16c0:05df -- kalau file ini ada
-// dan berisi NUM_CHANNELS=n, nilai itu yang dipakai, bukan hasil tebakan.
-// Dipanggil dari AppCore::init() supaya berlaku untuk mode GUI maupun CLI.
-// ---------------------------------------------------------------
-static void loadRelayChannelConfig(RelayController& relay, const std::string& path) {
-    std::ifstream f(path);
-    if (!f.is_open()) return;
-    std::string line;
-    while (std::getline(f, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        auto pos = line.find('=');
-        if (pos == std::string::npos) continue;
-        std::string key = line.substr(0, pos);
-        std::string val = line.substr(pos + 1);
-        while (!key.empty() && isspace((unsigned char)key.back())) key.pop_back();
-        size_t start = val.find_first_not_of(" \t");
-        if (start != std::string::npos) val = val.substr(start);
-        while (!val.empty() && isspace((unsigned char)val.back())) val.pop_back();
-        if (key == "NUM_CHANNELS") {
-            int n = std::atoi(val.c_str());
-            if (n > 0 && n <= 8) relay.setChannelCountOverride(n);
-        }
-    }
-}
-
 static std::string ts() {
     auto t  = std::time(nullptr);
     auto tm = *std::localtime(&t);
@@ -49,9 +21,11 @@ bool AppCore::init(const std::string& configPath) {
     if (!m_relay.init()) return false;
     if (!configPath.empty()) m_mapper.loadConfig(configPath);
 
-    // Path config jumlah channel relay: selalu di config/Relay.conf,
-    // terpisah dari device_map.conf (configPath, argumen di atas).
-    loadRelayChannelConfig(m_relay, "config/Relay.conf");
+    // Jumlah channel relay TIDAK lagi dibaca dari file config statis.
+    // RelayController::enumerate() sudah mendeteksi otomatis dari
+    // serial/product string HID (lihat relay_controller.cpp). Kalau
+    // ingin override manual sekali pakai, gunakan flag --channels N
+    // (lihat main.cpp), bukan file.
 
     m_monitor.setCallback([this](const USBDevice& d, USBAction a) {
         onUSBEvent(d, a);
