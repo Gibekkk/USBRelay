@@ -8,7 +8,7 @@
 #include <ctime>
 #include <iomanip>
 #include <cctype>
-
+#include <unistd.h>
 // ---------------------------------------------------------------
 // Widget globals
 // ---------------------------------------------------------------
@@ -32,8 +32,18 @@ static GtkWidget*     g_nim_entry     = nullptr;
 // ---------------------------------------------------------------
 static std::vector<int> g_scan_channels = { 1 };
 
+#include <sys/stat.h>
+
 // Path file log hasil scan (nim;nama;status;timestamp;silent_box_id)
-static const std::string kScanLogPath = "log.csv";
+static const std::string kLogDir = "logs";
+
+static std::string todayLogPath() {
+    auto t  = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+    std::ostringstream ss;
+    ss << std::put_time(&tm, "%d%m%y");
+    return kLogDir + "/" + ss.str() + ".csv";
+}
 
 // CSV NIM data: nim -> nama
 static std::unordered_map<std::string, std::string> g_nim_map;
@@ -70,14 +80,23 @@ static std::string nowTimestamp() {
     return ss.str();
 }
 
-// Tulis satu baris hasil scan ke log.csv (append, bukan overwrite).
-// Kolom mengikuti header log.csv: nim;nama;status;timestamp;silent_box_id
+// Tulis satu baris hasil scan ke logs/ddmmyy.csv (append).
+// File baru per hari, dibuat otomatis + header kalau belum ada.
 static void appendScanLog(const std::string& nim,
                            const std::string& nama,
                            const std::string& status,   // "IN" atau "OUT"
                            int silent_box_id) {
-    std::ofstream f(kScanLogPath, std::ios::app);
+    mkdir(kLogDir.c_str(), 0755);
+
+    std::string path = todayLogPath();
+    bool isNew = access(path.c_str(), F_OK) != 0;
+
+    std::ofstream f(path, std::ios::app);
     if (!f.is_open()) return;
+
+    if (isNew)
+        f << "nim;nama;status;timestamp;silent_box_id\n";
+
     f << nim << ';' << nama << ';' << status << ';'
       << nowTimestamp() << ';' << silent_box_id << '\n';
 }
