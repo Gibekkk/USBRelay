@@ -4,7 +4,10 @@
 #include <vector>
 #include <sstream>
 #include <fstream>
-#include <unordered_set>
+#include <unordered_map>
+#include <ctime>
+#include <iomanip>
+#include <cctype>
 
 // ---------------------------------------------------------------
 // Widget globals
@@ -21,24 +24,62 @@ static AppCore*       g_core          = nullptr;
 static int            g_num_channels  = 0;
 static GtkWidget*     g_nim_entry     = nullptr;
 
-// CSV NIM data
-static std::unordered_set<std::string> g_nim_set;
+// ---------------------------------------------------------------
+// Channel relay yang di-trigger saat scan NIM berhasil.
+// Sekarang cuma CH1, tapi tinggal tambah angka di sini kalau
+// nanti mau menyalakan lebih dari 1 channel sekaligus per scan,
+// contoh: { 1, 2 }
+// ---------------------------------------------------------------
+static std::vector<int> g_scan_channels = { 1 };
+
+// Path file log hasil scan (nim;nama;status;timestamp;silent_box_id)
+static const std::string kScanLogPath = "log.csv";
+
+// CSV NIM data: nim -> nama
+static std::unordered_map<std::string, std::string> g_nim_map;
 
 static void loadCSV(const std::string& path) {
-    g_nim_set.clear();
+    g_nim_map.clear();
     std::ifstream f(path);
     if (!f.is_open()) return;
     std::string line;
     std::getline(f, line); // skip header
     while (std::getline(f, line)) {
         if (line.empty()) continue;
-        std::string nim = line.substr(0, line.find(';'));
-        if (!nim.empty()) g_nim_set.insert(nim);
+        auto pos = line.find(';');
+        std::string nim  = line.substr(0, pos);
+        std::string nama = (pos == std::string::npos) ? "" : line.substr(pos + 1);
+        while (!nama.empty() && (nama.back() == '\r' || nama.back() == '\n'))
+            nama.pop_back();
+        if (!nim.empty()) g_nim_map[nim] = nama;
     }
 }
 
-static bool findNIM(const std::string& nim) {
-    return g_nim_set.count(nim) > 0;
+static bool findNIM(const std::string& nim, std::string& outNama) {
+    auto it = g_nim_map.find(nim);
+    if (it == g_nim_map.end()) return false;
+    outNama = it->second;
+    return true;
+}
+
+static std::string nowTimestamp() {
+    auto t  = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+    std::ostringstream ss;
+    ss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
+// Tulis satu baris hasil scan ke log.csv (append, bukan overwrite).
+// Kolom mengikuti header log.csv: nim;nama;status;timestamp;silent_box_id
+static void appendScanLog(const std::string& nim,
+                           const std::string& nama,
+                           const std::string& status,   // "IN" atau "OUT"
+                           int silent_box_id) {
+    std::ofstream f(kScanLogPath, std::ios::app);
+    if (!f.is_open()) return;
+    f << nim << ';' << nama << ';' << status << ';'
+      << nowTimestamp() << ';' << silent_box_id << '\n';
 }
 
 static const char* CSS =
@@ -331,15 +372,11 @@ static void onChannelOff(GtkButton*, gpointer data) {
 }
 
 // ---------------------------------------------------------------
-// NIM search + relay CH1 toggle
+// NIM search + toggle semua channel di g_scan_channels + log CSV
 // ---------------------------------------------------------------
-static void onNIMActivate(GtkEntry* entry, gpointer) {
-    const gchar* raw = gtk_entry_get_text(entry);
-    std::string text(raw);
-
-    // Split by '+', ambil index 0
-    std::string nim = text.substr(0, text.find('+'));
-    // Trim whitespace
+static void processScanInput(const std::string& raw) {
+    // Split by '+', ambil index 0 (barcode/RFID sering nambah suffix)
+    std::string nim = raw.substr(0, raw.find('+'));
     while (!nim.empty() && (nim.front() == ' ' || nim.front() == '\r'))
         nim.erase(nim.begin());
     while (!nim.empty() && (nim.back() == ' ' || nim.back() == '\r'))
@@ -352,31 +389,77 @@ static void onNIMActivate(GtkEntry* entry, gpointer) {
 
     appendLog("[NIM] Cari: " + nim);
 
-    if (!findNIM(nim)) {
+    std::string nama;
+    if (!findNIM(nim, nama)) {
         appendLog("[NIM] Tidak ditemukan: " + nim);
-        gtk_entry_set_text(entry, "");
         return;
     }
 
-    appendLog("[NIM] Ditemukan: " + nim);
+    appendLog("[NIM] Ditemukan: " + nim + "  (" + nama + ")");
 
     if (!g_core->isRelayConnected()) {
         appendLog("[!] Relay tidak terhubung.");
-        gtk_entry_set_text(entry, "");
         return;
     }
 
-    // Toggle CH1: cek bit 0 dari status
     uint8_t status = g_core->getRelayStatus();
-    bool ch1_on    = (status & 0x01) != 0;
-    bool new_state = !ch1_on;
 
-    if (g_core->setRelay(1, new_state))
-        appendLog(std::string("[Relay] CH1 toggle -> ") + (new_state ? "ON" : "OFF"));
-    else
-        appendLog("[!] Gagal toggle CH1.");
+    for (int ch : g_scan_channels) {
+        bool ch_on     = (status & (1 << (ch - 1))) != 0;
+        bool new_state = !ch_on;
+        std::string label = "CH" + std::to_string(ch);
 
+        if (!g_core->setRelay(ch, new_state)) {
+            appendLog("[!] Gagal toggle " + label + ".");
+            continue;
+        }
+
+        std::string scanStatus = new_state ? "IN" : "OUT";
+        appendLog("[Relay] " + label + " toggle -> " + scanStatus);
+        appendScanLog(nim, nama, scanStatus, ch);
+    }
+}
+
+static void onNIMActivate(GtkEntry* entry, gpointer) {
+    const gchar* raw = gtk_entry_get_text(entry);
+    processScanInput(std::string(raw));
     gtk_entry_set_text(entry, "");
+}
+
+// ---------------------------------------------------------------
+// Capture keystroke scanner USB (HID keyboard) di level window,
+// supaya scan tetap kebaca walau fokus sedang bukan di textbox
+// NIM. Ini TIDAK menangkap ketikan di luar aplikasi ini (bukan
+// keylogger sistem) — hanya event keyboard yang ditujukan ke
+// window aplikasi ini sendiri.
+// ---------------------------------------------------------------
+static std::string g_scan_buffer;
+
+static gboolean onWindowKeyPress(GtkWidget*, GdkEventKey* event, gpointer) {
+    // Kalau textbox NIM memang sedang fokus, biarkan GTK yang
+    // menangani seperti biasa (termasuk signal "activate").
+    if (gtk_widget_has_focus(g_nim_entry))
+        return FALSE;
+
+    if (event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter) {
+        std::string text = g_scan_buffer;
+        g_scan_buffer.clear();
+        gtk_entry_set_text(GTK_ENTRY(g_nim_entry), "");
+        processScanInput(text);
+        return TRUE;
+    }
+
+    guint32 uc = gdk_keyval_to_unicode(event->keyval);
+    if (uc >= 0x20 && uc < 0x7F) { // karakter cetak ASCII saja
+        g_scan_buffer += static_cast<char>(uc);
+        if (g_scan_buffer.size() > 128) // jaga-jaga input nyasar
+            g_scan_buffer.erase(0, g_scan_buffer.size() - 128);
+        gtk_entry_set_text(GTK_ENTRY(g_nim_entry), g_scan_buffer.c_str());
+        gtk_editable_set_position(GTK_EDITABLE(g_nim_entry), -1);
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 // ---------------------------------------------------------------
@@ -506,6 +589,8 @@ void run_gui(AppCore& core, int argc, char* argv[]) {
     gtk_window_set_title(GTK_WINDOW(g_window), "USB Relay Auto-Control");
     gtk_window_set_default_size(GTK_WINDOW(g_window), 800, 600);
     g_signal_connect(g_window, "destroy", G_CALLBACK(gtk_main_quit), nullptr);
+    // Tangkap keystroke scanner USB walau fokus bukan di textbox NIM
+    g_signal_connect(g_window, "key-press-event", G_CALLBACK(onWindowKeyPress), nullptr);
 
     GtkWidget* vbox_main = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_container_set_border_width(GTK_CONTAINER(vbox_main), 10);
@@ -523,7 +608,7 @@ void run_gui(AppCore& core, int argc, char* argv[]) {
     updateUSBList();
     appendLog("[*] USB Relay Auto-Control dimulai.");
     loadCSV("data.csv");
-    appendLog("[*] CSV dimuat: " + std::to_string(g_nim_set.size()) + " NIM.");
+    appendLog("[*] CSV dimuat: " + std::to_string(g_nim_map.size()) + " NIM.");
 
     // Coba langsung, kalau gagal mulai scan loop 5 detik
     tryAutoConnect();
