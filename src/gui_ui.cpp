@@ -218,8 +218,8 @@ static const char* CSS =
     ".relay-connected    { color: #27ae60; font-weight: bold; }"
     ".relay-disconnected { color: #c0392b; font-weight: bold; }"
     ".relay-scanning     { color: #f39c12; font-weight: bold; }"
-    ".channel-btn { min-width: 84px; min-height: 64px; font-size: 15px;"
-    "               font-weight: bold; border-radius: 10px; padding: 4px;"
+    ".channel-btn { min-width: 120px; min-height: 110px; font-size: 20px;"
+    "               font-weight: bold; border-radius: 10px; padding: 6px;"
     "               background-image: linear-gradient(rgba(149,165,166,0.78), rgba(149,165,166,0.78)), url(\"silentbox.png\");"
     "               background-size: cover; background-position: center; background-repeat: no-repeat;"
     "               color: #2c3e50; border: 2px solid #7f8c8d; }"
@@ -727,7 +727,10 @@ static GtkWidget* buildNIMPanel() {
 
 static GtkWidget* buildRelayPanel() {
     GtkWidget* frame = gtk_frame_new("Kontrol Relay");
+    gtk_widget_set_hexpand(frame, TRUE);
+    gtk_widget_set_vexpand(frame, TRUE);
     GtkWidget* vbox  = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_vexpand(vbox, TRUE);
     gtk_container_set_border_width(GTK_CONTAINER(vbox), 10);
     gtk_container_add(GTK_CONTAINER(frame), vbox);
 
@@ -776,13 +779,17 @@ static GtkWidget* buildRelayPanel() {
 static GtkWidget* buildUSBPanel() {
     GtkWidget* frame  = gtk_frame_new("USB Devices Terdeteksi");
     GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 200);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 120);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_hexpand(scroll, TRUE);
+    gtk_widget_set_vexpand(scroll, TRUE);
     g_usb_list = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(g_usb_list), GTK_SELECTION_NONE);
     gtk_container_add(GTK_CONTAINER(scroll), g_usb_list);
     gtk_container_add(GTK_CONTAINER(frame), scroll);
+    gtk_widget_set_hexpand(frame, TRUE);
+    gtk_widget_set_vexpand(frame, TRUE);
     return frame;
 }
 
@@ -792,17 +799,43 @@ static GtkWidget* buildLogPanel() {
     GtkWidget* textview = gtk_text_view_new();
     gtk_text_view_set_editable(GTK_TEXT_VIEW(textview), FALSE);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(textview), GTK_WRAP_WORD_CHAR);
-    gtk_widget_set_size_request(textview, -1, 150);
 
     g_log_buf  = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
     g_log_view = GTK_TEXT_VIEW(textview);
 
     gtk_container_add(GTK_CONTAINER(scroll), textview);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 150);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 100);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_hexpand(scroll, TRUE);
+    gtk_widget_set_vexpand(scroll, TRUE);
     gtk_container_add(GTK_CONTAINER(frame), scroll);
+    gtk_widget_set_hexpand(frame, TRUE);
+    gtk_widget_set_vexpand(frame, TRUE);
     return frame;
+}
+
+// Panel bawah: Log (kiri) dipisah dari USB Devices Terdeteksi (kanan)
+// pakai GtkPaned horizontal -- user bisa drag-resize sendiri pembagian
+// lebarnya, dan keduanya auto-scale (hexpand/vexpand TRUE) mengikuti
+// ukuran window, jadi tetap responsive baik saat window dilebarkan/
+// dipersempit maupun saat di-maximize/fullscreen.
+static GtkWidget* buildBottomPanel() {
+    GtkWidget* paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_set_hexpand(paned, TRUE);
+    gtk_widget_set_vexpand(paned, TRUE);
+
+    GtkWidget* logPanel = buildLogPanel();
+    GtkWidget* usbPanel = buildUSBPanel();
+
+    // resize=TRUE -> ikut membesar/mengecil saat paned di-resize
+    // shrink=TRUE -> boleh mengecil di bawah ukuran natural saat window
+    //                dipersempit, supaya tidak memaksa window minimum
+    //                jadi terlalu lebar/tinggi (tetap responsive)
+    gtk_paned_pack1(GTK_PANED(paned), logPanel, TRUE, TRUE);
+    gtk_paned_pack2(GTK_PANED(paned), usbPanel, TRUE, TRUE);
+
+    return paned;
 }
 
 void run_gui(AppCore& core, int argc, char* argv[]) {
@@ -820,18 +853,56 @@ void run_gui(AppCore& core, int argc, char* argv[]) {
     // Tangkap keystroke scanner USB walau fokus bukan di textbox NIM
     g_signal_connect(g_window, "key-press-event", G_CALLBACK(onWindowKeyPress), nullptr);
 
-    GtkWidget* vbox_main = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_container_set_border_width(GTK_CONTAINER(vbox_main), 10);
-    gtk_container_add(GTK_CONTAINER(g_window), vbox_main);
+    // Layout utama dibagi proporsional 50/50 secara vertikal pakai
+    // GtkPaned: panel atas (Kontrol Relay / grid tombol channel)
+    // mendapat 50% tinggi window, panel bawah (NIM + Log + USB Devices)
+    // mendapat 50% sisanya -- supaya tombol channel tidak lagi kekecilan
+    // (dulu cuma natural-size) dan tetap bisa di-resize manual oleh user
+    // via drag splitter kalau mau.
+    GtkWidget* main_paned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
+    gtk_container_set_border_width(GTK_CONTAINER(main_paned), 10);
+    gtk_widget_set_hexpand(main_paned, TRUE);
+    gtk_widget_set_vexpand(main_paned, TRUE);
+    gtk_container_add(GTK_CONTAINER(g_window), main_paned);
 
-    GtkWidget* hbox_top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_pack_start(GTK_BOX(hbox_top), buildRelayPanel(), TRUE,  TRUE,  0);
-    gtk_box_pack_start(GTK_BOX(hbox_top), buildUSBPanel(),   FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(vbox_main), hbox_top,         TRUE,  TRUE,  0);
-    gtk_box_pack_start(GTK_BOX(vbox_main), buildNIMPanel(),  FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(vbox_main), buildLogPanel(),  FALSE, FALSE, 0);
+    // Panel atas: grid tombol channel, vexpand TRUE supaya benar-benar
+    // mengisi porsi 50% tinggi yang dialokasikan (bukan cuma natural-size).
+    GtkWidget* relayPanel = buildRelayPanel();
+
+    // Panel bawah: NIM (natural-size, tetap di atas) + Log|USB Devices
+    // (mengambil semua sisa ruang di dalam panel bawah).
+    GtkWidget* bottom_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_vexpand(bottom_vbox, TRUE);
+    gtk_box_pack_start(GTK_BOX(bottom_vbox), buildNIMPanel(), FALSE, FALSE, 0);
+
+    // Log (kiri) <-> USB Devices Terdeteksi (kanan), dipisah GtkPaned
+    // horizontal (lihat buildBottomPanel()) -- user bisa drag-resize
+    // sendiri pembagian lebarnya.
+    GtkWidget* bottomPanel = buildBottomPanel();
+    gtk_box_pack_start(GTK_BOX(bottom_vbox), bottomPanel, TRUE, TRUE, 0);
+
+    // resize=TRUE -> kedua panel ikut membesar/mengecil saat window
+    //                di-resize, menjaga proporsi 50/50.
+    // shrink=TRUE -> boleh mengecil di bawah ukuran natural saat window
+    //                dipersempit, supaya tidak memaksa window minimum
+    //                jadi terlalu tinggi (tetap responsive).
+    gtk_paned_pack1(GTK_PANED(main_paned), relayPanel, TRUE, TRUE);
+    gtk_paned_pack2(GTK_PANED(main_paned), bottom_vbox, TRUE, TRUE);
 
     gtk_widget_show_all(g_window);
+
+    // Posisi awal splitter: 50% tinggi window untuk panel atas (channel),
+    // dan 50% lebar window untuk splitter Log|USB di panel bawah --
+    // dihitung dari ukuran window aktual biar rasionya konsisten di
+    // berbagai ukuran layar.
+    {
+        int win_w = 0, win_h = 0;
+        gtk_window_get_size(GTK_WINDOW(g_window), &win_w, &win_h);
+        if (win_w <= 1) win_w = 800;
+        if (win_h <= 1) win_h = 600;
+        gtk_paned_set_position(GTK_PANED(main_paned), (int)(win_h * 0.5));
+        gtk_paned_set_position(GTK_PANED(bottomPanel), (int)(win_w * 0.5));
+    }
 
     updateUSBList();
     appendLog("[*] USB Relay Auto-Control dimulai.");
