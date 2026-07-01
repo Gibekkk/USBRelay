@@ -16,18 +16,26 @@
 static GtkWidget*     g_window          = nullptr;
 static GtkWidget*     g_lbl_status      = nullptr;
 static GtkWidget*     g_lbl_devname     = nullptr;
-static GtkWidget*     g_ch_row[8]       = { nullptr }; // baris channel (untuk show/hide)
-static GtkWidget*     g_ch_indicators[8];
-static GtkWidget*     g_ch_user_lbl[8];                // label NIM/nama pemakai channel
 static GtkWidget*     g_usb_list        = nullptr;
 static GtkTextBuffer* g_log_buf         = nullptr;
 static GtkTextView*   g_log_view        = nullptr;
 static AppCore*       g_core            = nullptr;
 static int            g_num_channels    = 0;
 static GtkWidget*     g_nim_entry       = nullptr;
-static GtkWidget*     g_channel_selector = nullptr;      // grid berisi tombol channel besar, pilih channel sebelum scan
-static GtkWidget*     g_channel_buttons[8] = { nullptr }; // satu tombol per channel (index 0 = CH1)
-static int            g_selected_channel   = 0;           // channel yang sedang dipilih (0 = belum ada)
+
+// ---------------------------------------------------------------
+// Grid tombol channel besar, responsif (GtkFlowBox), dipakai SEKALIGUS
+// sebagai (1) indikator status tiap channel via warna, dan (2) selector
+// channel yang akan dinyalakan untuk scan NIM berikutnya:
+//   - abu-abu = channel OFF (belum dipakai) -> boleh dipilih (tap)
+//   - biru    = channel OFF & sedang DIPILIH untuk scan NIM berikutnya
+//   - hijau   = channel ON (aktif dipakai) -> tidak bisa dipilih
+// ---------------------------------------------------------------
+static GtkWidget*     g_channel_selector = nullptr;        // GtkFlowBox, wadah tombol channel
+static GtkWidget*     g_channel_buttons[8] = { nullptr };  // tombol per channel (index 0 = CH1)
+static GtkWidget*     g_channel_lbl[8]     = { nullptr };  // label teks di dalam tiap tombol
+static int            g_selected_channel   = 0;            // channel OFF yang sedang dipilih (0 = belum ada)
+static uint8_t        g_last_status_cache  = 0;            // cache status terakhir, dipakai saat refresh setelah klik
 
 #include <sys/stat.h>
 
@@ -207,21 +215,25 @@ static void reconcileRelayFromUsage(int num_channels) {
 }
 
 static const char* CSS =
-    ".indicator-on  { background-color: #2ecc71; color: white; border-radius:8px;"
-    "                 padding:4px 12px; font-weight:bold; }"
-    ".indicator-off { background-color: #e74c3c; color: white; border-radius:8px;"
-    "                 padding:4px 12px; font-weight:bold; }"
     ".relay-connected    { color: #27ae60; font-weight: bold; }"
     ".relay-disconnected { color: #c0392b; font-weight: bold; }"
     ".relay-scanning     { color: #f39c12; font-weight: bold; }"
-    ".channel-btn { min-width: 72px; min-height: 60px; font-size: 20px;"
-    "               font-weight: bold; border-radius: 10px;"
-    "               background-color: #ecf0f1; color: #2c3e50;"
-    "               border: 2px solid #bdc3c7; }"
-    ".channel-btn:hover { background-color: #dfe6e9; }"
-    ".channel-btn-selected { background-color: #2980b9; color: #ffffff;"
-    "                        border: 2px solid #1c5980; }"
-    ".channel-btn-selected:hover { background-color: #2980b9; }";
+    // Tombol channel: default = inactive (abu-abu)
+    ".channel-btn { min-width: 84px; min-height: 64px; font-size: 15px;"
+    "               font-weight: bold; border-radius: 10px; padding: 4px;"
+    "               background-color: #95a5a6; color: #2c3e50;"
+    "               border: 2px solid #7f8c8d; }"
+    ".channel-btn:hover { background-color: #a9b3b4; }"
+    // Selected = channel OFF tapi dipilih untuk scan berikutnya (biru)
+    ".channel-selected { background-color: #2980b9; color: #ffffff;"
+    "                    border: 2px solid #1c5980; }"
+    ".channel-selected:hover { background-color: #3491ce; }"
+    // Active = channel sedang ON (hijau), tidak bisa dipilih -> insensitive.
+    // opacity dipaksa 1 supaya warnanya tetap penuh walau tombolnya
+    // insensitive (tema GTK biasanya memudarkan widget insensitive).
+    ".channel-active { background-color: #27ae60; color: #ffffff;"
+    "                  border: 2px solid #1e8449; }"
+    ".channel-btn:disabled { opacity: 1; }";
 
 static void applyCSS() {
     GtkCssProvider* provider = gtk_css_provider_new();
@@ -246,60 +258,64 @@ static void appendLog(const std::string& msg) {
     gtk_text_buffer_delete_mark(g_log_buf, mark);
 }
 
-static void setIndicator(int ch_idx, bool on) {
-    GtkWidget* lbl = g_ch_indicators[ch_idx];
-    gtk_label_set_text(GTK_LABEL(lbl), on ? "ON" : "OFF");
-    GtkStyleContext* ctx = gtk_widget_get_style_context(lbl);
-    if (on) {
-        gtk_style_context_remove_class(ctx, "indicator-off");
-        gtk_style_context_add_class(ctx, "indicator-on");
-    } else {
-        gtk_style_context_remove_class(ctx, "indicator-on");
-        gtk_style_context_add_class(ctx, "indicator-off");
-    }
-}
-
+// Perbarui warna + label semua tombol channel sesuai status ON/OFF
+// terkini DAN channel mana yang sedang dipilih (g_selected_channel):
+//   - ON  -> hijau, tidak bisa dipilih (insensitive)
+//   - OFF & terpilih -> biru
+//   - OFF & tidak terpilih -> abu-abu (default)
 static void updateRelayStatus(uint8_t status) {
-    for (int i = 0; i < 8; i++) {
-        bool active = (g_num_channels > 0) && (i < g_num_channels);
-        bool on     = active && ((status >> i) & 1);
-        setIndicator(i, on);
+    g_last_status_cache = status;
 
-        if (g_ch_user_lbl[i]) {
-            int ch = i + 1;
+    for (int i = 0; i < 8; i++) {
+        GtkWidget* btn = g_channel_buttons[i];
+        if (!btn) continue;
+        int  ch     = i + 1;
+        bool inRange = i < g_num_channels;
+        bool on      = inRange && ((status >> i) & 1);
+
+        GtkStyleContext* ctx = gtk_widget_get_style_context(btn);
+        gtk_style_context_remove_class(ctx, "channel-active");
+        gtk_style_context_remove_class(ctx, "channel-selected");
+
+        if (on) {
+            gtk_style_context_add_class(ctx, "channel-active");
+            gtk_widget_set_sensitive(btn, FALSE); // aktif -> tidak bisa diselect
+            if (g_selected_channel == ch) g_selected_channel = 0;
+        } else {
+            gtk_widget_set_sensitive(btn, inRange);
+            if (ch == g_selected_channel)
+                gtk_style_context_add_class(ctx, "channel-selected");
+        }
+
+        if (g_channel_lbl[i]) {
             auto it = g_usage.find(ch);
-            std::string text = "-";
-            if (active && it != g_usage.end())
-                text = it->second.nim + " - " + it->second.nama;
-            gtk_label_set_text(GTK_LABEL(g_ch_user_lbl[i]), text.c_str());
+            std::string text = "CH" + std::to_string(ch);
+            if (inRange && it != g_usage.end())
+                text += "\n" + it->second.nim;
+            else
+                text += "\n-";
+            gtk_label_set_text(GTK_LABEL(g_channel_lbl[i]), text.c_str());
+
+            std::string tip = on
+                ? ("CH" + std::to_string(ch) + " AKTIF" +
+                   (it != g_usage.end() ? (" - " + it->second.nim + " (" + it->second.nama + ")") : ""))
+                : ("CH" + std::to_string(ch) + " kosong, ketuk untuk pilih");
+            gtk_widget_set_tooltip_text(btn, tip.c_str());
         }
     }
 }
 
-// Perbarui tampilan (warna) semua tombol channel sesuai channel yang
-// sedang terpilih di g_selected_channel.
-static void updateChannelButtonStyles() {
-    for (int i = 0; i < 8; i++) {
-        GtkWidget* btn = g_channel_buttons[i];
-        if (!btn) continue;
-        GtkStyleContext* ctx = gtk_widget_get_style_context(btn);
-        if (i + 1 == g_selected_channel)
-            gtk_style_context_add_class(ctx, "channel-btn-selected");
-        else
-            gtk_style_context_remove_class(ctx, "channel-btn-selected");
-    }
-}
-
-// Diklik saat user menekan salah satu tombol channel besar
+// Diklik saat user menekan salah satu tombol channel (hanya channel OFF
+// yang sensitif/bisa diklik -- channel ON otomatis insensitive).
 static void onChannelBtnClicked(GtkButton*, gpointer user_data) {
     g_selected_channel = GPOINTER_TO_INT(user_data);
-    updateChannelButtonStyles();
+    updateRelayStatus(g_last_status_cache);
 }
 
 // Bangun ulang grid tombol channel sesuai jumlah channel hasil auto-scan
-// relay. Menggantikan dropdown lama supaya lebih mudah ditekan (mis. di
-// layar sentuh) -- satu tombol besar per channel, channel terpilih
-// ditandai warna biru.
+// relay. GtkFlowBox otomatis reflow responsif sesuai lebar window --
+// diset maksimal 4 tombol per baris supaya di layar lebar/fullscreen
+// langsung terlihat 4 kolom sekaligus.
 static void populateChannelSelector(int num_ch) {
     if (!g_channel_selector) return;
 
@@ -307,36 +323,28 @@ static void populateChannelSelector(int num_ch) {
     for (GList* l = children; l; l = l->next)
         gtk_widget_destroy(GTK_WIDGET(l->data));
     g_list_free(children);
-    for (int i = 0; i < 8; i++) g_channel_buttons[i] = nullptr;
+    for (int i = 0; i < 8; i++) { g_channel_buttons[i] = nullptr; g_channel_lbl[i] = nullptr; }
 
     g_selected_channel = (num_ch > 0) ? 1 : 0;
 
-    const int kCols = 4; // maksimal 4 tombol per baris, cukup lega untuk ditekan
     for (int ch = 1; ch <= num_ch; ch++) {
-        std::string label = "CH" + std::to_string(ch);
-        GtkWidget* btn = gtk_button_new_with_label(label.c_str());
+        GtkWidget* btn = gtk_button_new();
         gtk_style_context_add_class(gtk_widget_get_style_context(btn), "channel-btn");
+
+        GtkWidget* lbl = gtk_label_new(("CH" + std::to_string(ch)).c_str());
+        gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_CENTER);
+        gtk_container_add(GTK_CONTAINER(btn), lbl);
+
         g_signal_connect(btn, "clicked", G_CALLBACK(onChannelBtnClicked), GINT_TO_POINTER(ch));
 
-        int idx = ch - 1;
-        gtk_grid_attach(GTK_GRID(g_channel_selector), btn, idx % kCols, idx / kCols, 1, 1);
-        g_channel_buttons[idx] = btn;
+        gtk_flow_box_insert(GTK_FLOW_BOX(g_channel_selector), btn, -1);
+        g_channel_buttons[ch - 1] = btn;
+        g_channel_lbl[ch - 1]     = lbl;
     }
 
     gtk_widget_set_sensitive(g_channel_selector, num_ch > 0);
     gtk_widget_show_all(g_channel_selector);
-    updateChannelButtonStyles();
-}
-
-// Tampilkan hanya baris channel 1..num_ch (auto-scan jumlah channel relay),
-// sembunyikan sisanya supaya UI mengikuti hardware yang benar-benar ada.
-static void showChannelRows(int num_ch) {
-    for (int i = 0; i < 8; i++) {
-        bool visible = i < num_ch;
-        if (g_ch_row[i])        gtk_widget_set_visible(g_ch_row[i],        visible);
-        if (g_ch_indicators[i]) gtk_widget_set_visible(g_ch_indicators[i], visible);
-        if (g_ch_user_lbl[i])   gtk_widget_set_visible(g_ch_user_lbl[i],   visible);
-    }
+    updateRelayStatus(g_last_status_cache);
 }
 
 static void setConnectedUI(const std::string& devname, int num_ch) {
@@ -348,9 +356,8 @@ static void setConnectedUI(const std::string& devname, int num_ch) {
     gtk_style_context_remove_class(ctx, "relay-scanning");
     gtk_style_context_add_class(ctx, "relay-connected");
 
-    showChannelRows(num_ch);
-    populateChannelSelector(num_ch);
     loadUsageCSV(num_ch);
+    populateChannelSelector(num_ch);
 }
 
 static void setDisconnectedUI() {
@@ -703,38 +710,22 @@ static gboolean onWindowKeyPress(GtkWidget*, GdkEventKey* event, gpointer) {
 // ---------------------------------------------------------------
 static GtkWidget* buildNIMPanel() {
     GtkWidget* frame = gtk_frame_new("Cari NIM");
-    GtkWidget* vbox  = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_container_set_border_width(GTK_CONTAINER(vbox), 8);
-    gtk_container_add(GTK_CONTAINER(frame), vbox);
+    GtkWidget* hbox  = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(hbox), 8);
+    gtk_container_add(GTK_CONTAINER(frame), hbox);
 
-    // Baris channel: grid tombol besar, dipilih SEBELUM scan NIM baru,
-    // menentukan channel mana yang akan dinyalakan. Isinya diisi
-    // otomatis sesuai jumlah channel hasil auto-scan relay (lihat
-    // populateChannelSelector()).
-    GtkWidget* hbox_ch = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    GtkWidget* lbl_ch  = gtk_label_new("Channel:");
-    g_channel_selector = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(g_channel_selector), 6);
-    gtk_grid_set_column_spacing(GTK_GRID(g_channel_selector), 6);
-    gtk_widget_set_sensitive(g_channel_selector, FALSE);
-
-    gtk_box_pack_start(GTK_BOX(hbox_ch), lbl_ch,             FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(hbox_ch), g_channel_selector, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(vbox), hbox_ch, FALSE, FALSE, 0);
-
-    // Baris NIM
-    GtkWidget* hbox_nim = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget* lbl      = gtk_label_new("NIM / Scan:");
-    g_nim_entry         = gtk_entry_new();
+    // Channel yang akan dinyalakan sekarang dipilih langsung di grid
+    // tombol pada panel "Kontrol Relay" di atas (tap tombol channel yang
+    // abu-abu/kosong -> jadi biru/terpilih), bukan di sini lagi.
+    GtkWidget* lbl = gtk_label_new("NIM / Scan:");
+    g_nim_entry    = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(g_nim_entry), "Scan atau ketik NIM lalu Enter...");
     gtk_widget_set_hexpand(g_nim_entry, TRUE);
 
     g_signal_connect(g_nim_entry, "activate", G_CALLBACK(onNIMActivate), nullptr);
 
-    gtk_box_pack_start(GTK_BOX(hbox_nim), lbl,         FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(hbox_nim), g_nim_entry, TRUE,  TRUE,  0);
-    gtk_box_pack_start(GTK_BOX(vbox), hbox_nim, FALSE, FALSE, 0);
-
+    gtk_box_pack_start(GTK_BOX(hbox), lbl,         FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(hbox), g_nim_entry, TRUE,  TRUE,  0);
     return frame;
 }
 
@@ -756,45 +747,24 @@ static GtkWidget* buildRelayPanel() {
     gtk_box_pack_start(GTK_BOX(hstatus), g_lbl_devname, FALSE, FALSE, 4);
     gtk_box_pack_start(GTK_BOX(vbox), hstatus, FALSE, FALSE, 0);
 
-    // Grid channel: tidak ada lagi tombol ON/OFF manual per-channel.
-    // Kontrol ON/OFF sekarang lewat panel "Cari NIM" (pilih channel di
-    // selector lalu scan NIM). Grid ini murni indikator status +
-    // siapa yang sedang memakai channel tsb.
-    // Baris channel yang ditampilkan otomatis menyesuaikan jumlah
-    // channel hasil auto-scan relay (lihat showChannelRows()).
-    GtkWidget* grid = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
-
-    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("CH"),      0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Status"),  1, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Pemakai"), 2, 0, 1, 1);
-
-    for (int i = 0; i < 8; i++) {
-        int ch = i + 1;
-        GtkWidget* lbl_ch = gtk_label_new(("CH" + std::to_string(ch)).c_str());
-        g_ch_indicators[i] = gtk_label_new("OFF");
-        g_ch_user_lbl[i]   = gtk_label_new("-");
-        gtk_label_set_xalign(GTK_LABEL(g_ch_user_lbl[i]), 0.0f);
-
-        GtkStyleContext* ctx = gtk_widget_get_style_context(g_ch_indicators[i]);
-        gtk_style_context_add_class(ctx, "indicator-off");
-
-        gtk_grid_attach(GTK_GRID(grid), lbl_ch,             0, ch, 1, 1);
-        gtk_grid_attach(GTK_GRID(grid), g_ch_indicators[i], 1, ch, 1, 1);
-        gtk_grid_attach(GTK_GRID(grid), g_ch_user_lbl[i],   2, ch, 1, 1);
-
-        // g_ch_row menandai baris mana yang harus di-show/hide sesuai
-        // jumlah channel yang benar-benar terdeteksi di relay
-        g_ch_row[i] = lbl_ch;
-        gtk_widget_set_no_show_all(lbl_ch,             TRUE);
-        gtk_widget_set_no_show_all(g_ch_indicators[i], TRUE);
-        gtk_widget_set_no_show_all(g_ch_user_lbl[i],   TRUE);
-        gtk_widget_hide(lbl_ch);
-        gtk_widget_hide(g_ch_indicators[i]);
-        gtk_widget_hide(g_ch_user_lbl[i]);
-    }
-    gtk_box_pack_start(GTK_BOX(vbox), grid, FALSE, FALSE, 0);
+    // Grid tombol channel besar & responsif (GtkFlowBox):
+    //   - dobel fungsi sebagai indikator status (warna) dan sebagai
+    //     selector channel untuk scan NIM berikutnya (tap untuk pilih).
+    //   - hijau = ON/aktif (tidak bisa dipilih), biru = terpilih,
+    //     abu-abu = OFF/kosong.
+    //   - jumlah tombol yang muncul otomatis menyesuaikan jumlah channel
+    //     hasil auto-scan relay (lihat populateChannelSelector()).
+    //   - homogeneous + max 4 per baris supaya di layar lebar/fullscreen
+    //     langsung terlihat 4 kolom, dan tetap reflow rapi di layar sempit.
+    g_channel_selector = gtk_flow_box_new();
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(g_channel_selector), GTK_SELECTION_NONE);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(g_channel_selector), TRUE);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(g_channel_selector), 4);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(g_channel_selector), 1);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(g_channel_selector), 8);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(g_channel_selector), 8);
+    gtk_widget_set_sensitive(g_channel_selector, FALSE);
+    gtk_box_pack_start(GTK_BOX(vbox), g_channel_selector, TRUE, TRUE, 0);
 
     // Tombol darurat: tetap disediakan untuk mematikan semua relay
     // manual (mis. kondisi macet/darurat), BUKAN untuk kontrol normal.
