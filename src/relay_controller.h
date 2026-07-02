@@ -25,14 +25,6 @@ public:
     bool openDevice(const std::string& path);
     void closeDevice();
 
-    // Override manual jumlah channel (opsional, lewat flag --channels N
-    // di command line -- BUKAN file config statis). Deteksi otomatis
-    // (enumerate()) mencoba beberapa pola dari serial/product string HID
-    // sebelum fallback ke 1 channel; override ini hanya untuk kasus
-    // langka di mana string itu benar-benar tidak mengandung petunjuk
-    // apa pun. Kalau di-set > 0, nilai ini yang dipakai.
-    void setChannelCountOverride(int n) { m_channel_override = n; }
-
     bool isOpen() const { return m_device != nullptr; }
     RelayInfo getInfo() const { return m_info; }
 
@@ -52,5 +44,4 @@ private:
     bool        m_initialized = false;
     uint8_t     m_last_status = 0;
     int         m_status_method = -1; // metode yang berhasil
-    int         m_channel_override = 0; // 0 = pakai hasil auto-detect enumerate()
 };

@@ -2,7 +2,6 @@
 #include <iostream>
 #include <string>
 #include <cstring>
-#include <cstdlib>
 
 // Deklarasi dari cli_ui.cpp dan gui_ui.cpp
 #ifdef USE_GUI
@@ -22,9 +21,6 @@ static void printUsage(const char *prog)
         << "  --gui              Jalankan mode GUI (GTK3)\n"
         << "  --config FILE      Path file konfigurasi device map\n"
         << "                     Default: ./config/device_map.conf\n"
-        << "  --channels N       Paksa jumlah channel relay (1-8), lewati\n"
-        << "                     auto-detect. Opsional, dipakai sekali saat\n"
-        << "                     start -- bukan file config yang perlu diedit.\n"
         << "  --help             Tampilkan pesan ini\n\n"
         << "Contoh:\n"
         << "  " << prog << " --cli --config /etc/usbrelay/rules.conf\n"
@@ -40,7 +36,6 @@ int main(int argc, char *argv[])
 {
     bool useGUI = false;
     std::string configPath = "config/device_map.conf";
-    int channelOverride = 0;
 
     for (int i = 1; i < argc; i++)
     {
@@ -57,12 +52,6 @@ int main(int argc, char *argv[])
         {
             configPath = argv[++i];
         }
-        else if (strcmp(argv[i], "--channels") == 0 && i + 1 < argc)
-        {
-            int n = std::atoi(argv[++i]);
-            if (n > 0 && n <= 8) channelOverride = n;
-            else std::cerr << "[WARN] --channels harus 1-8, diabaikan.\n";
-        }
     }
 
     AppCore core;
@@ -71,8 +60,6 @@ int main(int argc, char *argv[])
         std::cerr << "[ERROR] Gagal inisialisasi. Pastikan libhidapi dan libudev tersedia.\n";
         return 1;
     }
-    if (channelOverride > 0)
-        core.setChannelCountOverride(channelOverride);
 
     if (useGUI)
     {

@@ -2,75 +2,9 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
-#include <algorithm>
-#include <cctype>
 
 RelayController::RelayController() = default;
 RelayController::~RelayController() { closeDevice(); cleanup(); }
-
-// ---------------------------------------------------------------
-// Deteksi jumlah channel — MURNI dari teks (serial/product string HID).
-//
-// CATATAN JUJUR: device HID generic 16c0:05df (dan clone-nya) TIDAK
-// pernah mengekspos jumlah channel lewat descriptor atau feature report
-// -- field itu memang tidak ada di protokolnya sama sekali. Tidak ada
-// cara membaca "jumlah relay" langsung dari hardware. Semua di bawah
-// ini adalah heuristik bertingkat dari string, diurutkan dari yang
-// paling bisa dipercaya ke yang paling lemah. Kalau semua gagal,
-// fallback ke 1 channel (aman, tombolnya tetap bisa ditambah manual
-// via override kalau device ternyata >1 channel dan string-nya memang
-// tidak mengandung petunjuk apa pun).
-// ---------------------------------------------------------------
-
-// Layer kuat: cari pola eksplisit "...relay<N>", "...lcus-<N>", "...ch<N>"
-// (case-insensitive) di dalam teks. Ini sinyal paling bisa dipercaya karena
-// nama produk/serial memang sengaja mengandung angka channel.
-static int patternChannels(const std::string& text) {
-    if (text.empty()) return 0;
-    std::string lower(text.size(), '\0');
-    std::transform(text.begin(), text.end(), lower.begin(),
-                    [](unsigned char c) { return (char)std::tolower(c); });
-
-    static const char* kKeywords[] = { "relay", "lcus-", "lcus", "ch" };
-    for (const char* kw : kKeywords) {
-        size_t kwLen = std::strlen(kw);
-        size_t pos = 0;
-        while ((pos = lower.find(kw, pos)) != std::string::npos) {
-            size_t digitPos = pos + kwLen;
-            // izinkan satu karakter pemisah non-digit seperti '-' atau '_'
-            if (digitPos < text.size() && !std::isdigit((unsigned char)text[digitPos]))
-                digitPos++;
-            if (digitPos < text.size() &&
-                text[digitPos] >= '1' && text[digitPos] <= '8') {
-                return text[digitPos] - '0';
-            }
-            pos += kwLen;
-        }
-    }
-    return 0;
-}
-
-// Layer lemah: ambil digit 1-8 terakhir yang muncul di dalam teks.
-// Ini konvensi firmware dcttech asli (serial 5 karakter, posisi terakhir
-// = jumlah channel), tapi untuk board clone dengan serial acak bisa
-// salah kalau kebetulan ada digit 1-8 yang tidak berarti apa-apa.
-static int lastDigitChannels(const std::string& text) {
-    for (int i = (int)text.size() - 1; i >= 0; i--) {
-        if (text[i] >= '1' && text[i] <= '8') return text[i] - '0';
-    }
-    return 0;
-}
-
-// Gabungkan semua layer di atas untuk satu device, urut dari yang paling
-// dipercaya. Return 0 kalau benar-benar tidak ada petunjuk sama sekali.
-static int guessChannelCount(const std::string& serial, const std::string& product) {
-    int guess = 0;
-    if (guess <= 0) guess = patternChannels(product);   // "USBRelay4", "LCUS-2" dst -> paling kuat
-    if (guess <= 0) guess = patternChannels(serial);
-    if (guess <= 0) guess = lastDigitChannels(serial);  // konvensi firmware dcttech asli
-    if (guess <= 0) guess = lastDigitChannels(product);
-    return guess;
-}
 
 bool RelayController::init() {
     if (hid_init() < 0) return false;
@@ -94,21 +28,24 @@ std::vector<RelayInfo> RelayController::enumerate() {
             info.serial.assign(ws.begin(), ws.end());
         }
 
-        std::string product;
-        if (d->product_string) {
-            std::wstring w(d->product_string);
-            product.assign(w.begin(), w.end());
+        if (info.serial.size() >= 5) {
+            char c = info.serial[4];
+            if (c >= '1' && c <= '8')
+                info.num_channels = c - '0';
         }
 
-        int guessed = guessChannelCount(info.serial, product);
-        info.num_channels = (guessed > 0) ? guessed : 1;
+        if (info.num_channels <= 0 && d->product_string) {
+            std::wstring prod(d->product_string);
+            for (int i = (int)prod.size() - 1; i >= 0; i--) {
+                if (prod[i] >= L'1' && prod[i] <= L'8') {
+                    info.num_channels = prod[i] - L'0';
+                    break;
+                }
+            }
+        }
 
-        // Override manual (opsional, lewat --channels N di command line,
-        // BUKAN file config statis) tetap menang kalau di-set -- untuk
-        // kasus langka di mana serial/product benar-benar tidak
-        // mengandung petunjuk apa pun.
-        if (m_channel_override > 0)
-            info.num_channels = m_channel_override;
+        if (info.num_channels <= 0)
+            info.num_channels = 1;
 
         result.push_back(info);
     }
@@ -259,13 +196,6 @@ std::vector<std::string> RelayController::scanStatus() {
 
     // Pilih metode terbaik: res > 0, dan jika m_status_method sudah diset pakai itu
     // Kandidat byte status: index 6, 7, 8
-    // CATATAN: byte hasil decode di sini HANYA untuk log/diagnostik &
-    // menentukan metode baca mana yang direspons device (dipakai getStatus()
-    // untuk cek device masih hidup/tidak). TIDAK dipakai untuk menimpa
-    // m_last_status, karena decode bitmask ini terbukti tidak reliable
-    // untuk sebagian board multi-channel (CH1 kebetulan cocok, CH2+ tidak).
-    // m_last_status yang jadi acuan tetap dari software (setChannel/setAll),
-    // direkonsiliasi ulang dari usage.csv oleh pemanggil setelah connect.
     uint8_t best_status = m_last_status;
     int     best_method = -1;
 
@@ -292,12 +222,14 @@ std::vector<std::string> RelayController::scanStatus() {
 
     if (best_method >= 0) {
         m_status_method = best_method;
-        // m_last_status SENGAJA tidak ditimpa oleh best_status (lihat catatan di atas)
+        m_last_status   = best_status;
         std::ostringstream ss;
-        ss << "[scan] Metode baca yang dipakai: M" << best_method
-           << " (raw decode 0x" << std::hex << std::setw(2) << std::setfill('0')
-           << (int)best_status << std::dec << ", hanya untuk cek koneksi)"
-           << " -- status channel sebenarnya mengikuti catatan software.";
+        ss << "[scan] Pakai M" << best_method
+           << " -> status=0x" << std::hex << std::setw(2) << std::setfill('0')
+           << (int)best_status << " (bits: ";
+        for (int i = 7; i >= 0; i--)
+            ss << ((best_status >> i) & 1);
+        ss << ")";
         logs.push_back(ss.str());
     } else {
         logs.push_back("[scan] Semua metode gagal / timeout.");
@@ -358,21 +290,7 @@ bool RelayController::setAll(bool on) {
 uint8_t RelayController::getStatus() {
     if (!m_device) return m_last_status;
 
-    // ---------------------------------------------------------------
-    // PENTING: kita TIDAK lagi menimpa m_last_status dengan hasil decode
-    // byte mentah dari hardware di sini. Banyak board clone 16c0:05df
-    // (termasuk board 4-channel) tidak mengembalikan bitmask multi-channel
-    // yang konsisten lewat metode baca manapun (hid_get_feature_report /
-    // hid_read_timeout) — dulu ini yang bikin CH1 kebetulan kebaca benar
-    // tapi CH2-CH4 salah. Status channel yang kita percayai adalah state
-    // yang KITA sendiri kirim & catat lewat setChannel()/setAll()
-    // (m_last_status), yang direkonsiliasi ulang saat konek (lihat
-    // gui_ui.cpp: reasserted dari usage.csv).
-    //
-    // Pembacaan hardware di bawah ini HANYA dipakai untuk mendeteksi
-    // apakah device masih hidup/terhubung (write/read gagal = dianggap
-    // lepas), bukan untuk menentukan status channel mana yang ON/OFF.
-    // ---------------------------------------------------------------
+    // Gunakan metode yang sudah diketahui bekerja dari scanStatus()
     if (m_status_method < 0) {
         // Belum scan, return cache
         return m_last_status;
@@ -402,11 +320,13 @@ uint8_t RelayController::getStatus() {
     if (res < 0) {
         hid_close(m_device);
         m_device = nullptr;
+        return m_last_status;
     }
 
-    // res >= 0 berarti device masih merespons -> tetap terhubung.
-    // Status channel dikembalikan dari cache software (m_last_status),
-    // bukan dari decode buf di atas.
+    if (res >= 9)      m_last_status = buf[8];
+    else if (res >= 8) m_last_status = buf[7];
+    else if (res >= 7) m_last_status = buf[6];
+
     return m_last_status;
 }
 

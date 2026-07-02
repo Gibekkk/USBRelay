@@ -2,9 +2,6 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-#include <fstream>
-#include <cctype>
-#include <cstdlib>
 
 static std::string ts() {
     auto t  = std::time(nullptr);
@@ -20,12 +17,6 @@ AppCore::~AppCore() { shutdown(); }
 bool AppCore::init(const std::string& configPath) {
     if (!m_relay.init()) return false;
     if (!configPath.empty()) m_mapper.loadConfig(configPath);
-
-    // Jumlah channel relay TIDAK lagi dibaca dari file config statis.
-    // RelayController::enumerate() sudah mendeteksi otomatis dari
-    // serial/product string HID (lihat relay_controller.cpp). Kalau
-    // ingin override manual sekali pakai, gunakan flag --channels N
-    // (lihat main.cpp), bukan file.
 
     m_monitor.setCallback([this](const USBDevice& d, USBAction a) {
         onUSBEvent(d, a);

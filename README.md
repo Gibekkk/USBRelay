@@ -63,34 +63,9 @@ make install-udev
 # Mode GUI
 ./usbrelay-gui --gui
 
-# Paksa jumlah channel (opsional, kalau auto-detect salah tebak)
-./usbrelay-cli --channels 4
-
 # Tampilkan bantuan
 ./usbrelay-cli --help
 ```
-
-## Deteksi Jumlah Channel Relay (Otomatis)
-
-Saat relay terhubung, jumlah channel dideteksi **otomatis** dari serial
-number / product string HID -- tombolnya di GUI/CLI dibuat dinamis sesuai
-hasil deteksi ini (tidak ada jumlah channel yang di-hardcode). Urutan
-deteksi, dari yang paling dipercaya:
-
-1. Pola eksplisit di product string, mis. `USBRelay4`, `LCUS-2` → langsung
-   diambil angkanya.
-2. Pola yang sama dicoba di serial number.
-3. Konvensi firmware asli dcttech: digit terakhir pada serial number.
-4. Digit terakhir pada product string.
-5. Kalau semua gagal (string tidak mengandung petunjuk sama sekali) →
-   fallback ke 1 channel.
-
-**Catatan jujur:** protokol HID board relay `16c0:05df` (termasuk board
-clone) memang tidak punya field "jumlah channel" di hardware-nya —
-tidak ada cara membaca itu langsung dari device. Heuristik di atas
-menutup sebagian besar kasus tanpa perlu edit file apa pun. Untuk kasus
-langka yang tetap salah tebak, pakai flag `--channels N` sekali saat
-menjalankan program (bukan file config yang perlu di-maintain).
 
 ## Tombol CLI
 
