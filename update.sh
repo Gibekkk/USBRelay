@@ -1,4 +1,5 @@
 git pull
 make clean
-make all
-./usbrelay-gui --gui
+make linux
+chmod +x dist/gui-app-linux
+./dist/gui-app-linux
