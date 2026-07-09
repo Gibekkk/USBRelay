@@ -1,5 +1,4 @@
 #pragma once
-#include <libudev.h>
 #include <string>
 #include <vector>
 #include <functional>
@@ -7,14 +6,21 @@
 #include <atomic>
 #include <mutex>
 
+// Header ini SENGAJA tidak menyertakan header khusus platform (libudev,
+// IOKit, Windows SDK, dsb). Implementasi per-platform ada di
+// usb_monitor.cpp, dipilih otomatis lewat #if defined(...) sesuai OS
+// saat kompilasi. Dengan begini header ini aman di-include dari mana
+// saja (app_core.h, cli_ui.cpp, gui_ui.cpp) tanpa membocorkan detail
+// platform ke kode yang platform-independent.
+
 struct USBDevice {
     std::string vid;
     std::string pid;
     std::string serial;
     std::string manufacturer;
     std::string product;
-    std::string syspath;
-    std::string devpath;
+    std::string syspath;   // Linux: syspath udev. Mac/Win: identifier device (boleh kosong)
+    std::string devpath;   // Linux: devpath udev.  Mac/Win: identifier device (boleh kosong)
 };
 
 enum class USBAction { ADDED, REMOVED };
@@ -33,14 +39,16 @@ public:
     // Ambil semua USB device yang saat ini terhubung
     std::vector<USBDevice> getConnectedDevices();
 
-private:
-    void run();
-    USBDevice fromUdev(struct udev_device* dev);
+    // --- Detail internal (pimpl), dipakai hanya oleh usb_monitor.cpp ---
+    // Publik semata-mata supaya fungsi-fungsi bebas di usb_monitor.cpp
+    // (thread runloop tiap platform) bisa memanggilnya lewat pointer
+    // USBMonitor::Impl*. Bukan bagian dari API yang dimaksudkan untuk
+    // dipakai kode lain (app_core, cli_ui, gui_ui).
+    struct Impl;                // detail platform, didefinisikan di usb_monitor.cpp
+    void dispatch(const USBDevice& dev, USBAction action);
 
-    struct udev*         m_udev    = nullptr;
-    struct udev_monitor* m_monitor = nullptr;
-    USBCallback          m_callback;
-    std::thread          m_thread;
-    std::atomic<bool>    m_running{false};
-    std::mutex           m_cbMutex;
+private:
+    Impl*                  m_impl = nullptr;
+    USBCallback            m_callback;
+    std::mutex             m_cbMutex;
 };

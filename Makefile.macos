@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------
+# Makefile khusus macOS.
+#
+# Pakai file ini (bukan Makefile biasa) di Mac:
+#   make -f Makefile.macos deps      # install dependency lewat Homebrew
+#   make -f Makefile.macos all       # build CLI + GUI
+#
+# Kalau mau, boleh juga symlink/rename supaya bisa "make" polos:
+#   ln -sf Makefile.macos Makefile
+# ---------------------------------------------------------------
+
+CXX      := clang++
+CXXFLAGS := -std=c++17 -Wall -Wextra -O2
+SRCDIR   := src
+OBJDIR   := build
+
+# Homebrew bisa di /usr/local (Intel) atau /opt/homebrew (Apple Silicon).
+# pkg-config dari Homebrew otomatis tahu prefix yang benar selama
+# `brew install pkg-config` sudah dijalankan dan PATH sudah benar
+# (brew shellenv). Kalau pkg-config belum ada di PATH, jalankan dulu:
+#   eval "$(brew shellenv)"
+HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+PKG_CONFIG_PATH := $(HOMEBREW_PREFIX)/lib/pkgconfig:$(HOMEBREW_PREFIX)/opt/ncurses/lib/pkgconfig
+
+HIDAPI_CFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags hidapi 2>/dev/null)
+HIDAPI_LIBS   := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   hidapi 2>/dev/null)
+GTK_CFLAGS    := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags gtk+-3.0 2>/dev/null)
+GTK_LIBS      := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   gtk+-3.0 2>/dev/null)
+
+# usb_monitor.cpp di macOS pakai IOKit (bukan libudev seperti di Linux)
+FRAMEWORKS := -framework IOKit -framework CoreFoundation
+
+COMMON_SRCS := \
+    $(SRCDIR)/relay_controller.cpp \
+    $(SRCDIR)/usb_monitor.cpp \
+    $(SRCDIR)/device_mapper.cpp \
+    $(SRCDIR)/app_core.cpp
+
+CLI_SRCS := $(COMMON_SRCS) $(SRCDIR)/cli_ui.cpp $(SRCDIR)/main.cpp
+GUI_SRCS := $(COMMON_SRCS) $(SRCDIR)/gui_ui.cpp $(SRCDIR)/main.cpp
+
+# ncurses bawaan macOS (Xcode Command Line Tools) sudah cukup, tidak perlu Homebrew
+CLI_LIBS := $(HIDAPI_LIBS) $(FRAMEWORKS) -lncurses
+GUI_LIBS := $(HIDAPI_LIBS) $(FRAMEWORKS) $(GTK_LIBS)
+
+TARGET_CLI := usbrelay-cli
+TARGET_GUI := usbrelay-gui
+
+.PHONY: all cli gui clean install deps
+
+all: cli gui
+
+cli: $(CLI_SRCS)
+	@mkdir -p $(OBJDIR)
+	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) \
+		-o $(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
+	@echo "==> Build CLI selesai: $(TARGET_CLI)"
+
+gui: $(GUI_SRCS)
+	@mkdir -p $(OBJDIR)
+	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) $(GTK_CFLAGS) -DUSE_GUI \
+		-o $(TARGET_GUI) $(GUI_SRCS) $(GUI_LIBS)
+	@echo "==> Build GUI selesai: $(TARGET_GUI)"
+
+# Install dependency lewat Homebrew (https://brew.sh)
+deps:
+	brew install hidapi gtk+3 pkg-config
+
+install: all
+	sudo cp $(TARGET_CLI) /usr/local/bin/
+	sudo cp $(TARGET_GUI) /usr/local/bin/
+	sudo mkdir -p /etc/usbrelay
+	@[ -f /etc/usbrelay/device_map.conf ] || \
+	    sudo cp config/device_map.conf /etc/usbrelay/device_map.conf
+	@echo "==> Installed ke /usr/local/bin/"
+
+clean:
+	rm -f $(TARGET_CLI) $(TARGET_GUI)
+	rm -rf $(OBJDIR)

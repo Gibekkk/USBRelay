@@ -1,3 +1,9 @@
+# ---------------------------------------------------------------
+# Makefile untuk LINUX.
+#   - macOS   -> pakai Makefile.macos  (make -f Makefile.macos all)
+#   - Windows -> pakai build_windows.bat (tidak perlu "make" sama sekali)
+# ---------------------------------------------------------------
+
 CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 SRCDIR   := src
@@ -22,12 +28,15 @@ GUI_LIBS := -lhidapi-hidraw -ludev $(GTK_LIBS)
 TARGET_CLI := usbrelay-cli
 TARGET_GUI := usbrelay-gui
 
-# Hapus baris CLI_SRCS, CLI_LIBS, TARGET_CLI
-# Ubah all: cli gui  →  all: gui
+.PHONY: all cli gui clean install deps install-udev
 
-.PHONY: all gui clean install deps
+all: cli gui
 
-all: gui
+cli: $(CLI_SRCS)
+	@mkdir -p $(OBJDIR)
+	$(CXX) $(CXXFLAGS) \
+		-o $(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
+	@echo "==> Build CLI selesai: $(TARGET_CLI)"
 
 gui: $(GUI_SRCS)
 	@mkdir -p $(OBJDIR)

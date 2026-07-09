@@ -9,7 +9,20 @@
 #include <iomanip>
 #include <cctype>
 #include <algorithm>
-#include <unistd.h>
+#if defined(_WIN32)
+  #include <direct.h>
+  #include <io.h>
+  #define USBRELAY_MKDIR(path) _mkdir(path)
+  #define USBRELAY_ACCESS(path, mode) _access(path, mode)
+  #ifndef F_OK
+    #define F_OK 0
+  #endif
+#else
+  #include <unistd.h>
+  #include <sys/stat.h>
+  #define USBRELAY_MKDIR(path) mkdir(path, 0755)
+  #define USBRELAY_ACCESS(path, mode) access(path, mode)
+#endif
 // ---------------------------------------------------------------
 // Widget globals
 // ---------------------------------------------------------------
@@ -36,8 +49,6 @@ static GtkWidget*     g_channel_buttons[8] = { nullptr };  // tombol per channel
 static GtkWidget*     g_channel_lbl[8]     = { nullptr };  // label teks di dalam tiap tombol
 static int            g_selected_channel   = 0;            // channel OFF yang sedang dipilih (0 = belum ada)
 static uint8_t        g_last_status_cache  = 0;            // cache status terakhir, dipakai saat refresh setelah klik
-
-#include <sys/stat.h>
 
 // Path file log hasil scan (nim;nama;status;timestamp;silent_box_id)
 static const std::string kLogDir = "logs";
@@ -91,10 +102,10 @@ static void appendScanLog(const std::string& nim,
                            const std::string& nama,
                            const std::string& status,   // "IN" atau "OUT"
                            int silent_box_id) {
-    mkdir(kLogDir.c_str(), 0755);
+    USBRELAY_MKDIR(kLogDir.c_str());
 
     std::string path = todayLogPath();
-    bool isNew = access(path.c_str(), F_OK) != 0;
+    bool isNew = USBRELAY_ACCESS(path.c_str(), F_OK) != 0;
 
     std::ofstream f(path, std::ios::app);
     if (!f.is_open()) return;

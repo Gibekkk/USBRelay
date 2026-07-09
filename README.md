@@ -1,7 +1,13 @@
 # USB Relay Auto-Control
 
 Aplikasi C++ untuk kontrol USB relay secara otomatis berdasarkan deteksi USB device.
-Tersedia mode CLI (ncurses) dan GUI (GTK3).
+Tersedia mode CLI (ncurses/PDCurses) dan GUI (GTK3).
+
+Sudah bisa dibangun (build) untuk **Linux**, **macOS**, dan **Windows**. Kode
+inti (relay_controller, device_mapper, app_core) sama persis di ketiga OS;
+yang beda hanya lapisan deteksi USB (`usb_monitor.cpp`, otomatis pilih
+implementasi lewat `#if defined(...)` -- libudev di Linux, IOKit di macOS,
+SetupAPI di Windows) dan build system.
 
 ## Cara Kerja
 
@@ -9,7 +15,7 @@ Tersedia mode CLI (ncurses) dan GUI (GTK3).
 USB Device dipasang
       │
       ▼
-USBMonitor (libudev) mendeteksi event
+USBMonitor mendeteksi event   (Linux: libudev · macOS: IOKit · Windows: SetupAPI)
       │
       ▼
 DeviceMapper mencocokkan VID:PID dengan aturan di config
@@ -21,47 +27,114 @@ RelayController (hidapi) mengeksekusi perintah ke relay
 UI (CLI/GUI) update tampilan status
 ```
 
-## Instalasi Dependencies
+---
+
+## Build di Linux
 
 ```bash
-# Ubuntu / Debian / Raspberry Pi
 sudo apt-get install -y \
     libhidapi-dev libhidapi-hidraw0 \
     libudev-dev \
     libncurses-dev \
     libgtk-3-dev \
     pkg-config build-essential
+# atau: make deps
 
-# Atau pakai Makefile:
-make deps
-```
-
-## Build
-
-```bash
 make all      # Build keduanya (CLI + GUI)
 make cli      # Hanya CLI
 make gui      # Hanya GUI
 ```
 
-## Pasang udev Rule (agar tidak perlu sudo)
+### Pasang udev Rule (agar tidak perlu sudo)
 
 ```bash
 make install-udev
 # Lalu cabut dan pasang kembali relay USB
 ```
 
-## Jalankan
+---
+
+## Build di macOS
+
+Pakai `Makefile.macos` (bukan `Makefile` biasa), karena path library dan
+framework yang dipakai beda dari Linux (IOKit, bukan libudev).
+
+```bash
+# 1) Install Homebrew kalau belum ada: https://brew.sh
+# 2) Install dependency:
+make -f Makefile.macos deps
+#    (ini setara: brew install hidapi gtk+3 pkg-config)
+
+# 3) Build
+make -f Makefile.macos all      # CLI + GUI
+make -f Makefile.macos cli      # Hanya CLI
+make -f Makefile.macos gui      # Hanya GUI
+```
+
+Kalau mau bisa ketik `make` polos, symlink dulu:
+```bash
+ln -sf Makefile.macos Makefile
+make all
+```
+
+**Catatan macOS:** hidapi di Mac mengakses HID device lewat IOKit, jadi saat
+`usbrelay-cli`/`usbrelay-gui` pertama kali dijalankan, macOS bisa minta izin
+**Input Monitoring** (System Settings → Privacy & Security → Input
+Monitoring). Aktifkan izinnya lalu jalankan ulang programnya.
+
+---
+
+## Build di Windows
+
+**Tidak butuh `make` sama sekali** -- cukup `g++` dari MSYS2. Ini sengaja
+supaya tidak error seperti kalau pakai Makefile langsung di Windows (banyak
+instalasi Windows tidak punya `make`, dan path library GTK/hidapi/ncurses
+juga beda formatnya dari Unix).
+
+1. Install [MSYS2](https://www.msys2.org/).
+2. Buka terminal **"MSYS2 MinGW64"** (bukan "MSYS2 MSYS" / "MSYS2 UCRT64"),
+   lalu jalankan:
+   ```bash
+   pacman -Syu
+   # tutup & buka lagi terminal kalau diminta, lalu:
+   pacman -S --needed \
+       mingw-w64-x86_64-gcc \
+       mingw-w64-x86_64-pkgconf \
+       mingw-w64-x86_64-hidapi \
+       mingw-w64-x86_64-pdcurses \
+       mingw-w64-x86_64-gtk3
+   ```
+3. Dari Command Prompt / File Explorer (boleh di luar MSYS2), jalankan
+   `build_windows.bat` di folder project ini (double-click atau
+   `build_windows.bat` di cmd).
+   - Script otomatis mendeteksi `g++` dari `C:\msys64\mingw64\bin`.
+   - Kalau MSYS2 diinstall bukan di `C:\msys64`, set environment variable
+     `MSYS2_MINGW64_BIN` ke folder `...\mingw64\bin` sebelum menjalankan.
+4. Hasil build: `usbrelay-cli.exe` dan `usbrelay-gui.exe` langsung muncul di
+   folder yang sama -- tinggal dijalankan / didistribusikan.
+
+**Catatan Windows:**
+- Kalau `usbrelay-gui.exe` dijalankan lewat double-click dan gagal start
+  karena "DLL tidak ditemukan", jalankan dari dalam terminal MSYS2 MinGW64
+  (`./usbrelay-gui.exe`) supaya semua DLL GTK/hidapi ketemu lewat PATH, atau
+  copy DLL yang relevan dari `C:\msys64\mingw64\bin` ke folder yang sama
+  dengan .exe sebelum didistribusikan ke komputer lain.
+- Tidak perlu udev rule (itu khusus Linux) -- device HID pada Windows sudah
+  bisa diakses lewat hidapi tanpa driver tambahan untuk board `16c0:05df`.
+
+---
+
+## Jalankan (semua platform)
 
 ```bash
 # Mode CLI (default)
-./usbrelay-cli
+./usbrelay-cli                 # Windows: usbrelay-cli.exe
 
 # Mode CLI dengan config custom
 ./usbrelay-cli --config /path/ke/rules.conf
 
 # Mode GUI
-./usbrelay-gui --gui
+./usbrelay-gui --gui           # Windows: usbrelay-gui.exe --gui
 
 # Paksa jumlah channel (opsional, kalau auto-detect salah tebak)
 ./usbrelay-cli --channels 4
@@ -149,16 +222,18 @@ Jika relay kamu pakai VID:PID berbeda, ubah konstanta di:
 
 ```
 usbrelay-autocontrol/
-├── Makefile
+├── Makefile              ← build Linux
+├── Makefile.macos        ← build macOS
+├── build_windows.bat     ← build Windows (tanpa "make")
 ├── README.md
 ├── config/
 │   └── device_map.conf      ← aturan VID:PID -> relay channel
 └── src/
     ├── main.cpp              ← entry point, parse --cli/--gui
-    ├── relay_controller.h/cpp ← kontrol relay via hidapi
-    ├── usb_monitor.h/cpp     ← monitor USB via libudev
+    ├── relay_controller.h/cpp ← kontrol relay via hidapi (sama di 3 OS)
+    ├── usb_monitor.h/cpp     ← monitor USB (libudev/IOKit/SetupAPI sesuai OS)
     ├── device_mapper.h/cpp   ← parsing config & rule matching
     ├── app_core.h/cpp        ← business logic utama
-    ├── cli_ui.cpp            ← TUI ncurses
+    ├── cli_ui.cpp            ← TUI ncurses (Linux/macOS) / PDCurses (Windows)
     └── gui_ui.cpp            ← GUI GTK3
 ```

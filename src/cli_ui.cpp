@@ -1,10 +1,15 @@
 #include "app_core.h"
-#include <ncurses.h>
+#if defined(_WIN32)
+  #include <curses.h>   // PDCurses -- API sama dengan ncurses
+#else
+  #include <ncurses.h>
+#endif
 #include <vector>
 #include <string>
 #include <deque>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 
 // ---------------------------------------------------------------
 // Layout:
