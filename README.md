@@ -1,7 +1,7 @@
 # USB Relay Auto-Control
 
 Aplikasi C++ untuk kontrol USB relay secara otomatis berdasarkan deteksi USB device.
-GUI (GTK3).
+Tersedia mode CLI (ncurses) dan GUI (GTK3).
 
 ## Cara Kerja
 
@@ -18,38 +18,33 @@ DeviceMapper mencocokkan VID:PID dengan aturan di config
 RelayController (hidapi) mengeksekusi perintah ke relay
       │
       ▼
-GUI update tampilan status
+UI (CLI/GUI) update tampilan status
 ```
 
 ## Instalasi Dependencies
 
 ```bash
-# Linux (Ubuntu/Debian/Raspberry Pi)
-make deps-linux
+# Ubuntu / Debian / Raspberry Pi
+sudo apt-get install -y \
+    libhidapi-dev libhidapi-hidraw0 \
+    libudev-dev \
+    libncurses-dev \
+    libgtk-3-dev \
+    pkg-config build-essential
 
-# macOS (butuh Homebrew)
-make deps-mac
-
-# Windows (butuh MSYS2/MinGW-w64)
-make deps-windows
+# Atau pakai Makefile:
+make deps
 ```
 
 ## Build
 
-Build dijalankan native di masing-masing OS (bukan cross-compile):
-
 ```bash
-make linux     # di Linux   -> dist/gui-app-linux
-make mac       # di macOS   -> dist/gui-app-mac
-make windows   # di Windows -> dist/gui-app-win.exe
-make all       # jalankan ketiganya sekaligus (hanya berhasil penuh kalau
-               # toolchain ketiga OS tersedia di mesin yang sama, mis. CI matrix)
+make all      # Build keduanya (CLI + GUI)
+make cli      # Hanya CLI
+make gui      # Hanya GUI
 ```
 
-Backend deteksi USB otomatis dipilih sesuai OS: `libudev` (Linux, push-event),
-polling `hidapi` ringan tiap 300ms (macOS & Windows, tanpa dependency tambahan).
-
-## Pasang udev Rule (agar tidak perlu sudo, khusus Linux)
+## Pasang udev Rule (agar tidak perlu sudo)
 
 ```bash
 make install-udev
@@ -59,29 +54,26 @@ make install-udev
 ## Jalankan
 
 ```bash
-# Linux
-./dist/gui-app-linux
+# Mode CLI (default)
+./usbrelay-cli
 
-# macOS
-./dist/gui-app-mac
+# Mode CLI dengan config custom
+./usbrelay-cli --config /path/ke/rules.conf
 
-# Windows
-dist\gui-app-win.exe
-
-# Config custom
-./dist/gui-app-linux --config /path/ke/rules.conf
+# Mode GUI
+./usbrelay-gui --gui
 
 # Paksa jumlah channel (opsional, kalau auto-detect salah tebak)
-./dist/gui-app-linux --channels 4
+./usbrelay-cli --channels 4
 
 # Tampilkan bantuan
-./dist/gui-app-linux --help
+./usbrelay-cli --help
 ```
 
 ## Deteksi Jumlah Channel Relay (Otomatis)
 
 Saat relay terhubung, jumlah channel dideteksi **otomatis** dari serial
-number / product string HID -- tombolnya di GUI dibuat dinamis sesuai
+number / product string HID -- tombolnya di GUI/CLI dibuat dinamis sesuai
 hasil deteksi ini (tidak ada jumlah channel yang di-hardcode). Urutan
 deteksi, dari yang paling dipercaya:
 
@@ -99,6 +91,18 @@ tidak ada cara membaca itu langsung dari device. Heuristik di atas
 menutup sebagian besar kasus tanpa perlu edit file apa pun. Untuk kasus
 langka yang tetap salah tebak, pakai flag `--channels N` sekali saat
 menjalankan program (bukan file config yang perlu di-maintain).
+
+## Tombol CLI
+
+| Tombol | Fungsi                   |
+|--------|--------------------------|
+| Q      | Keluar                   |
+| R      | Scan & connect relay     |
+| C      | Connect relay            |
+| D      | Disconnect relay         |
+| A      | Semua channel ON         |
+| Z      | Semua channel OFF        |
+| 1-8    | Toggle channel 1-8       |
 
 ## Konfigurasi Device Map
 
@@ -150,10 +154,11 @@ usbrelay-autocontrol/
 ├── config/
 │   └── device_map.conf      ← aturan VID:PID -> relay channel
 └── src/
-    ├── main.cpp              ← entry point
+    ├── main.cpp              ← entry point, parse --cli/--gui
     ├── relay_controller.h/cpp ← kontrol relay via hidapi
-    ├── usb_monitor.h/usb_monitor_{linux,mac,win}.cpp ← monitor USB per-OS
+    ├── usb_monitor.h/cpp     ← monitor USB via libudev
     ├── device_mapper.h/cpp   ← parsing config & rule matching
     ├── app_core.h/cpp        ← business logic utama
+    ├── cli_ui.cpp            ← TUI ncurses
     └── gui_ui.cpp            ← GUI GTK3
 ```
