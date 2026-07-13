@@ -30,7 +30,12 @@ if not "%MSYS2_MINGW64_BIN%"=="" set MINGW_BIN=%MSYS2_MINGW64_BIN%
 where g++ >nul 2>nul
 if errorlevel 1 (
     echo [*] g++ belum ada di PATH, coba tambahkan dari %MINGW_BIN% ...
-    set PATH=%MINGW_BIN%;%PATH%
+    REM Pakai !PATH! (delayed expansion), BUKAN %PATH% -- PATH bawaan Windows
+    REM hampir selalu berisi tanda kurung (mis. "Program Files (x86)",
+    REM "Common Files"), dan %PATH% di dalam blok if(...) bikin parser cmd.exe
+    REM salah baca kurung itu sebagai penutup blok -> error
+    REM "...\Common was unexpected at this time."
+    set "PATH=%MINGW_BIN%;!PATH!"
 )
 
 where g++ >nul 2>nul
@@ -89,19 +94,22 @@ if errorlevel 1 (
 echo       -^> %DISTDIR%\usbrelay-cli.exe selesai.
 
 echo.
-if "%GTK_LIBS%"=="" (
-    echo [SKIP] GTK3 tidak ditemukan lewat pkg-config, build GUI dilewati.
-    echo        Install dengan: pacman -S mingw-w64-x86_64-gtk3
-) else (
-    echo [2/2] Build GUI ^(GTK3^) -^> %DISTDIR%\usbrelay-gui.exe
-    g++ %CXXFLAGS% %HIDAPI_CFLAGS% %GTK_CFLAGS% -DUSE_GUI -mwindows -o %DISTDIR%\usbrelay-gui.exe %GUI_SRCS% %HIDAPI_LIBS% %GTK_LIBS%
-    if errorlevel 1 (
-        echo [ERROR] Build GUI gagal.
-        exit /b 1
-    )
-    echo       -^> %DISTDIR%\usbrelay-gui.exe selesai.
-)
+if "%GTK_LIBS%"=="" goto :skip_gui
 
+echo [2/2] Build GUI ^(GTK3^) -^> %DISTDIR%\usbrelay-gui.exe
+g++ %CXXFLAGS% %HIDAPI_CFLAGS% %GTK_CFLAGS% -DUSE_GUI -mwindows -o %DISTDIR%\usbrelay-gui.exe %GUI_SRCS% %HIDAPI_LIBS% %GTK_LIBS%
+if errorlevel 1 (
+    echo [ERROR] Build GUI gagal.
+    exit /b 1
+)
+echo       -^> %DISTDIR%\usbrelay-gui.exe selesai.
+goto :after_gui
+
+:skip_gui
+echo [SKIP] GTK3 tidak ditemukan lewat pkg-config, build GUI dilewati.
+echo        Install dengan: pacman -S mingw-w64-x86_64-gtk3
+
+:after_gui
 echo.
 echo [OK] Build selesai. File ada di folder %DISTDIR%\ (exe + config\).
 echo      Jalankan: %DISTDIR%\usbrelay-cli.exe --help

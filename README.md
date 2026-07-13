@@ -125,13 +125,23 @@ juga beda formatnya dari Unix).
 
 ### Perbaikan pada `build_windows.bat` (build sebelumnya gagal)
 
-Build CLI di Windows sebelumnya **selalu gagal** (`curses.h: No such file or
-directory`). Penyebabnya: paket `mingw-w64-x86_64-pdcurses` di MSYS2
-memasang headernya di `mingw64\include\pdcurses\curses.h`, bukan langsung di
-`mingw64\include\curses.h`, dan tidak punya file `pkg-config` -- jadi script
-lama tidak pernah tahu harus menambahkan `-I` ke folder itu. Sudah
-diperbaiki: script sekarang menambahkan
-`-I"<mingw64>\include\pdcurses"` secara eksplisit sebelum build CLI.
+Ada dua bug lama di script ini:
+
+1. **Build CLI selalu gagal** (`curses.h: No such file or directory`).
+   Paket `mingw-w64-x86_64-pdcurses` di MSYS2 memasang headernya di
+   `mingw64\include\pdcurses\curses.h`, bukan langsung di
+   `mingw64\include\curses.h`, dan tidak punya file `pkg-config` -- jadi
+   script lama tidak pernah tahu harus menambahkan `-I` ke folder itu.
+   Sudah diperbaiki: script menambahkan `-I"<mingw64>\include\pdcurses"`
+   secara eksplisit sebelum build CLI.
+
+2. **Error `"...\Common was unexpected at this time."`** saat g++ belum
+   ada di PATH. Script lama menjalankan `set PATH=%MINGW_BIN%;%PATH%` di
+   dalam blok `if (...)`. PATH bawaan Windows hampir selalu berisi tanda
+   kurung (mis. `Program Files (x86)`, `Common Files`), dan tanda kurung
+   itu membuat parser `cmd.exe` salah baca sebagai penutup blok `if`.
+   Sudah diperbaiki pakai delayed expansion (`!PATH!`), dan blok build GUI
+   diubah ke `goto` supaya tidak rentan bug yang sama.
 
 Selain itu, `dist\usbrelay-gui.exe` dibuild dengan `-mwindows` (tanpa jendela
 console), jadi kalau dulu gagal start karena hidapi/config tidak ketemu,
