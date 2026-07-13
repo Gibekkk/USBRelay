@@ -48,6 +48,10 @@ where g++
 
 set CXXFLAGS=-std=c++17 -Wall -Wextra -O2
 set SRCDIR=src
+set DISTDIR=dist
+
+if not exist %DISTDIR% mkdir %DISTDIR%
+xcopy /Y /I /E /Q config %DISTDIR%\config >nul
 
 set COMMON_SRCS=%SRCDIR%\relay_controller.cpp %SRCDIR%\usb_monitor.cpp %SRCDIR%\device_mapper.cpp %SRCDIR%\app_core.cpp
 set CLI_SRCS=%COMMON_SRCS% %SRCDIR%\cli_ui.cpp %SRCDIR%\main.cpp
@@ -65,33 +69,40 @@ set GTK_LIBS=
 for /f "delims=" %%i in ('pkg-config --cflags gtk+-3.0 2^>nul') do set GTK_CFLAGS=%%i
 for /f "delims=" %%i in ('pkg-config --libs gtk+-3.0 2^>nul') do set GTK_LIBS=%%i
 
+REM --- PDCurses: TIDAK ada file pkg-config untuk paket ini di MSYS2, dan
+REM header-nya terpasang di mingw64\include\pdcurses\curses.h (BUKAN
+REM langsung di mingw64\include\curses.h). Tanpa -I ini, build CLI gagal
+REM dengan error "curses.h: No such file or directory" -- ini penyebab
+REM utama build Windows sebelumnya tidak jalan.
+set PDCURSES_CFLAGS=-I"%MINGW_BIN%\..\include\pdcurses"
+
 REM usb_monitor.cpp di Windows pakai SetupAPI (bawaan Windows SDK / MinGW,
 REM tidak perlu package tambahan) -> tinggal -lsetupapi (sudah di HIDAPI_LIBS)
 
 echo.
-echo [1/2] Build CLI (ncurses via PDCurses) -^> usbrelay-cli.exe
-g++ %CXXFLAGS% %HIDAPI_CFLAGS% -o usbrelay-cli.exe %CLI_SRCS% %HIDAPI_LIBS% -lpdcurses
+echo [1/2] Build CLI (ncurses via PDCurses) -^> %DISTDIR%\usbrelay-cli.exe
+g++ %CXXFLAGS% %HIDAPI_CFLAGS% %PDCURSES_CFLAGS% -o %DISTDIR%\usbrelay-cli.exe %CLI_SRCS% %HIDAPI_LIBS% -lpdcurses
 if errorlevel 1 (
     echo [ERROR] Build CLI gagal.
     exit /b 1
 )
-echo       -^> usbrelay-cli.exe selesai.
+echo       -^> %DISTDIR%\usbrelay-cli.exe selesai.
 
 echo.
 if "%GTK_LIBS%"=="" (
     echo [SKIP] GTK3 tidak ditemukan lewat pkg-config, build GUI dilewati.
     echo        Install dengan: pacman -S mingw-w64-x86_64-gtk3
 ) else (
-    echo [2/2] Build GUI ^(GTK3^) -^> usbrelay-gui.exe
-    g++ %CXXFLAGS% %HIDAPI_CFLAGS% %GTK_CFLAGS% -DUSE_GUI -mwindows -o usbrelay-gui.exe %GUI_SRCS% %HIDAPI_LIBS% %GTK_LIBS%
+    echo [2/2] Build GUI ^(GTK3^) -^> %DISTDIR%\usbrelay-gui.exe
+    g++ %CXXFLAGS% %HIDAPI_CFLAGS% %GTK_CFLAGS% -DUSE_GUI -mwindows -o %DISTDIR%\usbrelay-gui.exe %GUI_SRCS% %HIDAPI_LIBS% %GTK_LIBS%
     if errorlevel 1 (
         echo [ERROR] Build GUI gagal.
         exit /b 1
     )
-    echo       -^> usbrelay-gui.exe selesai.
+    echo       -^> %DISTDIR%\usbrelay-gui.exe selesai.
 )
 
 echo.
-echo [OK] Build selesai. File .exe ada di folder ini.
-echo      Jalankan: usbrelay-cli.exe --help
+echo [OK] Build selesai. File ada di folder %DISTDIR%\ (exe + config\).
+echo      Jalankan: %DISTDIR%\usbrelay-cli.exe --help
 endlocal

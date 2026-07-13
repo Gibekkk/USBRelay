@@ -4,6 +4,13 @@
 #include <cstring>
 #include <cstdlib>
 
+#if defined(_WIN32) && defined(USE_GUI)
+// usbrelay-gui.exe dibuild dengan -mwindows (tanpa console), jadi
+// std::cerr tidak terlihat kalau gagal dobel-klik -- tampilkan MessageBox
+// juga supaya error tidak "hilang" begitu saja.
+#include <windows.h>
+#endif
+
 // Deklarasi dari cli_ui.cpp dan gui_ui.cpp
 #ifdef USE_GUI
 // Hapus guard, tinggal:
@@ -69,6 +76,12 @@ int main(int argc, char *argv[])
     if (!core.init(configPath))
     {
         std::cerr << "[ERROR] Gagal inisialisasi. Pastikan libhidapi dan libudev tersedia.\n";
+#if defined(_WIN32) && defined(USE_GUI)
+        MessageBoxA(nullptr,
+            "Gagal inisialisasi USB Relay Auto-Control.\n"
+            "Pastikan DLL hidapi tersedia (jalankan dari folder dist\\ apa adanya).",
+            "USB Relay Auto-Control", MB_OK | MB_ICONERROR);
+#endif
         return 1;
     }
     if (channelOverride > 0)

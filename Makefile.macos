@@ -13,6 +13,7 @@ CXX      := clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 SRCDIR   := src
 OBJDIR   := build
+DISTDIR  := dist
 
 # Homebrew bisa di /usr/local (Intel) atau /opt/homebrew (Apple Silicon).
 # pkg-config dari Homebrew otomatis tahu prefix yang benar selama
@@ -46,34 +47,27 @@ GUI_LIBS := $(HIDAPI_LIBS) $(FRAMEWORKS) $(GTK_LIBS)
 TARGET_CLI := usbrelay-cli
 TARGET_GUI := usbrelay-gui
 
-.PHONY: all cli gui clean install deps
+.PHONY: all cli gui clean deps dist-assets
 
 all: cli gui
 
-cli: $(CLI_SRCS)
-	@mkdir -p $(OBJDIR)
-	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) \
-		-o $(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
-	@echo "==> Build CLI selesai: $(TARGET_CLI)"
+dist-assets:
+	@mkdir -p $(OBJDIR) $(DISTDIR)
+	@cp -r config $(DISTDIR)/ 2>/dev/null || true
 
-gui: $(GUI_SRCS)
-	@mkdir -p $(OBJDIR)
+cli: dist-assets $(CLI_SRCS)
+	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) \
+		-o $(DISTDIR)/$(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
+	@echo "==> Build CLI selesai: $(DISTDIR)/$(TARGET_CLI)"
+
+gui: dist-assets $(GUI_SRCS)
 	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) $(GTK_CFLAGS) -DUSE_GUI \
-		-o $(TARGET_GUI) $(GUI_SRCS) $(GUI_LIBS)
-	@echo "==> Build GUI selesai: $(TARGET_GUI)"
+		-o $(DISTDIR)/$(TARGET_GUI) $(GUI_SRCS) $(GUI_LIBS)
+	@echo "==> Build GUI selesai: $(DISTDIR)/$(TARGET_GUI)"
 
 # Install dependency lewat Homebrew (https://brew.sh)
 deps:
 	brew install hidapi gtk+3 pkg-config
 
-install: all
-	sudo cp $(TARGET_CLI) /usr/local/bin/
-	sudo cp $(TARGET_GUI) /usr/local/bin/
-	sudo mkdir -p /etc/usbrelay
-	@[ -f /etc/usbrelay/device_map.conf ] || \
-	    sudo cp config/device_map.conf /etc/usbrelay/device_map.conf
-	@echo "==> Installed ke /usr/local/bin/"
-
 clean:
-	rm -f $(TARGET_CLI) $(TARGET_GUI)
-	rm -rf $(OBJDIR)
+	rm -rf $(OBJDIR) $(DISTDIR)

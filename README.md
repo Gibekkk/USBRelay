@@ -9,6 +9,10 @@ yang beda hanya lapisan deteksi USB (`usb_monitor.cpp`, otomatis pilih
 implementasi lewat `#if defined(...)` -- libudev di Linux, IOKit di macOS,
 SetupAPI di Windows) dan build system.
 
+**Semua hasil build masuk ke folder `dist/`** -- tidak ada langkah "install"
+ke sistem. Tinggal jalankan langsung dari `dist/`, atau copy folder itu ke
+mana pun.
+
 ## Cara Kerja
 
 ```
@@ -40,10 +44,15 @@ sudo apt-get install -y \
     pkg-config build-essential
 # atau: make deps
 
-make all      # Build keduanya (CLI + GUI)
-make cli      # Hanya CLI
-make gui      # Hanya GUI
+make all      # Build keduanya (CLI + GUI) -> dist/
+make cli      # Hanya CLI  -> dist/usbrelay-cli
+make gui      # Hanya GUI  -> dist/usbrelay-gui
+make clean    # Hapus build/ dan dist/
 ```
+
+Setiap kali build, folder `config/` otomatis disalin ke `dist/config/` supaya
+`dist/` bisa langsung dipakai berdiri sendiri (tidak perlu file lain dari
+repo ini).
 
 ### Pasang udev Rule (agar tidak perlu sudo)
 
@@ -65,7 +74,7 @@ framework yang dipakai beda dari Linux (IOKit, bukan libudev).
 make -f Makefile.macos deps
 #    (ini setara: brew install hidapi gtk+3 pkg-config)
 
-# 3) Build
+# 3) Build -> dist/
 make -f Makefile.macos all      # CLI + GUI
 make -f Makefile.macos cli      # Hanya CLI
 make -f Makefile.macos gui      # Hanya GUI
@@ -78,9 +87,9 @@ make all
 ```
 
 **Catatan macOS:** hidapi di Mac mengakses HID device lewat IOKit, jadi saat
-`usbrelay-cli`/`usbrelay-gui` pertama kali dijalankan, macOS bisa minta izin
-**Input Monitoring** (System Settings → Privacy & Security → Input
-Monitoring). Aktifkan izinnya lalu jalankan ulang programnya.
+`dist/usbrelay-cli`/`dist/usbrelay-gui` pertama kali dijalankan, macOS bisa
+minta izin **Input Monitoring** (System Settings → Privacy & Security →
+Input Monitoring). Aktifkan izinnya lalu jalankan ulang programnya.
 
 ---
 
@@ -110,15 +119,32 @@ juga beda formatnya dari Unix).
    - Script otomatis mendeteksi `g++` dari `C:\msys64\mingw64\bin`.
    - Kalau MSYS2 diinstall bukan di `C:\msys64`, set environment variable
      `MSYS2_MINGW64_BIN` ke folder `...\mingw64\bin` sebelum menjalankan.
-4. Hasil build: `usbrelay-cli.exe` dan `usbrelay-gui.exe` langsung muncul di
-   folder yang sama -- tinggal dijalankan / didistribusikan.
+4. Hasil build: `dist\usbrelay-cli.exe`, `dist\usbrelay-gui.exe`, dan
+   `dist\config\device_map.conf` langsung muncul di folder `dist\` --
+   tinggal dijalankan / didistribusikan sebagai satu folder.
+
+### Perbaikan pada `build_windows.bat` (build sebelumnya gagal)
+
+Build CLI di Windows sebelumnya **selalu gagal** (`curses.h: No such file or
+directory`). Penyebabnya: paket `mingw-w64-x86_64-pdcurses` di MSYS2
+memasang headernya di `mingw64\include\pdcurses\curses.h`, bukan langsung di
+`mingw64\include\curses.h`, dan tidak punya file `pkg-config` -- jadi script
+lama tidak pernah tahu harus menambahkan `-I` ke folder itu. Sudah
+diperbaiki: script sekarang menambahkan
+`-I"<mingw64>\include\pdcurses"` secara eksplisit sebelum build CLI.
+
+Selain itu, `dist\usbrelay-gui.exe` dibuild dengan `-mwindows` (tanpa jendela
+console), jadi kalau dulu gagal start karena hidapi/config tidak ketemu,
+tidak ada pesan error yang terlihat sama sekali -- programnya seperti
+"diam saja". Sekarang ditambahkan `MessageBox` sebagai pengganti pesan error
+supaya tetap terlihat walau dijalankan lewat double-click.
 
 **Catatan Windows:**
-- Kalau `usbrelay-gui.exe` dijalankan lewat double-click dan gagal start
+- Kalau `dist\usbrelay-gui.exe` dijalankan lewat double-click dan gagal start
   karena "DLL tidak ditemukan", jalankan dari dalam terminal MSYS2 MinGW64
-  (`./usbrelay-gui.exe`) supaya semua DLL GTK/hidapi ketemu lewat PATH, atau
-  copy DLL yang relevan dari `C:\msys64\mingw64\bin` ke folder yang sama
-  dengan .exe sebelum didistribusikan ke komputer lain.
+  (`./dist/usbrelay-gui.exe`) supaya semua DLL GTK/hidapi ketemu lewat PATH,
+  atau copy DLL yang relevan dari `C:\msys64\mingw64\bin` ke folder `dist\`
+  sebelum didistribusikan ke komputer lain.
 - Tidak perlu udev rule (itu khusus Linux) -- device HID pada Windows sudah
   bisa diakses lewat hidapi tanpa driver tambahan untuk board `16c0:05df`.
 
@@ -127,6 +153,8 @@ juga beda formatnya dari Unix).
 ## Jalankan (semua platform)
 
 ```bash
+cd dist
+
 # Mode CLI (default)
 ./usbrelay-cli                 # Windows: usbrelay-cli.exe
 
@@ -142,6 +170,11 @@ juga beda formatnya dari Unix).
 # Tampilkan bantuan
 ./usbrelay-cli --help
 ```
+
+Default `--config` adalah `config/device_map.conf` **relatif terhadap folder
+tempat binary dijalankan** -- karena itu `config/` selalu ikut disalin ke
+`dist/` saat build, supaya menjalankan langsung dari dalam `dist/` bekerja
+tanpa opsi tambahan.
 
 ## Deteksi Jumlah Channel Relay (Otomatis)
 
@@ -179,7 +212,7 @@ menjalankan program (bukan file config yang perlu di-maintain).
 
 ## Konfigurasi Device Map
 
-Edit `config/device_map.conf`:
+Edit `dist/config/device_map.conf` (hasil salinan dari `config/`):
 
 ```
 # Format: VID:PID  CHANNEL  ACTION  [LABEL]
@@ -222,12 +255,16 @@ Jika relay kamu pakai VID:PID berbeda, ubah konstanta di:
 
 ```
 usbrelay-autocontrol/
-├── Makefile              ← build Linux
-├── Makefile.macos        ← build macOS
-├── build_windows.bat     ← build Windows (tanpa "make")
+├── Makefile              ← build Linux      -> dist/
+├── Makefile.macos        ← build macOS      -> dist/
+├── build_windows.bat     ← build Windows (tanpa "make") -> dist/
 ├── README.md
 ├── config/
-│   └── device_map.conf      ← aturan VID:PID -> relay channel
+│   └── device_map.conf      ← aturan VID:PID -> relay channel (sumber, disalin ke dist/config/ saat build)
+├── dist/                    ← HASIL BUILD (dibuat otomatis, gitignore)
+│   ├── usbrelay-cli(.exe)
+│   ├── usbrelay-gui(.exe)
+│   └── config/device_map.conf
 └── src/
     ├── main.cpp              ← entry point, parse --cli/--gui
     ├── relay_controller.h/cpp ← kontrol relay via hidapi (sama di 3 OS)

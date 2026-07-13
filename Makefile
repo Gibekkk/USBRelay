@@ -2,12 +2,16 @@
 # Makefile untuk LINUX.
 #   - macOS   -> pakai Makefile.macos  (make -f Makefile.macos all)
 #   - Windows -> pakai build_windows.bat (tidak perlu "make" sama sekali)
+#
+# Semua hasil build (binary + config) masuk ke folder dist/.
+# Tidak ada target "install" -- jalankan langsung dari dist/.
 # ---------------------------------------------------------------
 
 CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 SRCDIR   := src
 OBJDIR   := build
+DISTDIR  := dist
 
 # Deteksi pkg-config untuk GTK3
 GTK_CFLAGS  := $(shell pkg-config --cflags gtk+-3.0 2>/dev/null)
@@ -28,21 +32,25 @@ GUI_LIBS := -lhidapi-hidraw -ludev $(GTK_LIBS)
 TARGET_CLI := usbrelay-cli
 TARGET_GUI := usbrelay-gui
 
-.PHONY: all cli gui clean install deps install-udev
+.PHONY: all cli gui clean deps install-udev dist-assets
 
 all: cli gui
 
-cli: $(CLI_SRCS)
-	@mkdir -p $(OBJDIR)
-	$(CXX) $(CXXFLAGS) \
-		-o $(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
-	@echo "==> Build CLI selesai: $(TARGET_CLI)"
+# Siapkan folder dist/ + salin config supaya dist/ bisa langsung dipakai
+# tanpa perlu file lain dari repo ini.
+dist-assets:
+	@mkdir -p $(OBJDIR) $(DISTDIR)
+	@cp -r config $(DISTDIR)/ 2>/dev/null || true
 
-gui: $(GUI_SRCS)
-	@mkdir -p $(OBJDIR)
+cli: dist-assets $(CLI_SRCS)
+	$(CXX) $(CXXFLAGS) \
+		-o $(DISTDIR)/$(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
+	@echo "==> Build CLI selesai: $(DISTDIR)/$(TARGET_CLI)"
+
+gui: dist-assets $(GUI_SRCS)
 	$(CXX) $(CXXFLAGS) $(GTK_CFLAGS) -DUSE_GUI \
-		-o $(TARGET_GUI) $(GUI_SRCS) $(GUI_LIBS)
-	@echo "==> Build GUI selesai: $(TARGET_GUI)"
+		-o $(DISTDIR)/$(TARGET_GUI) $(GUI_SRCS) $(GUI_LIBS)
+	@echo "==> Build GUI selesai: $(DISTDIR)/$(TARGET_GUI)"
 
 # Install dependencies (Debian/Ubuntu)
 deps:
@@ -63,14 +71,5 @@ install-udev:
 	sudo udevadm trigger
 	@echo "==> udev rule dipasang. Cabut & pasang kembali relay."
 
-install: all
-	sudo cp $(TARGET_CLI) /usr/local/bin/
-	sudo cp $(TARGET_GUI) /usr/local/bin/
-	sudo mkdir -p /etc/usbrelay
-	@[ -f /etc/usbrelay/device_map.conf ] || \
-	    sudo cp config/device_map.conf /etc/usbrelay/device_map.conf
-	@echo "==> Installed ke /usr/local/bin/"
-
 clean:
-	rm -f $(TARGET_CLI) $(TARGET_GUI)
-	rm -rf $(OBJDIR)
+	rm -rf $(OBJDIR) $(DISTDIR)
