@@ -10,7 +10,7 @@
 // IOKit, Windows SDK, dsb). Implementasi per-platform ada di
 // usb_monitor.cpp, dipilih otomatis lewat #if defined(...) sesuai OS
 // saat kompilasi. Dengan begini header ini aman di-include dari mana
-// saja (app_core.h, cli_ui.cpp, gui_ui.cpp) tanpa membocorkan detail
+// saja (app_core.h, gui_ui.cpp) tanpa membocorkan detail
 // platform ke kode yang platform-independent.
 
 struct USBDevice {
@@ -43,7 +43,7 @@ public:
     // Publik semata-mata supaya fungsi-fungsi bebas di usb_monitor.cpp
     // (thread runloop tiap platform) bisa memanggilnya lewat pointer
     // USBMonitor::Impl*. Bukan bagian dari API yang dimaksudkan untuk
-    // dipakai kode lain (app_core, cli_ui, gui_ui).
+    // dipakai kode lain (app_core, gui_ui).
     struct Impl;                // detail platform, didefinisikan di usb_monitor.cpp
     void dispatch(const USBDevice& dev, USBAction action);
 

@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------
-# Makefile untuk LINUX.
+# Makefile untuk LINUX (GUI-only).
 #   - macOS   -> pakai Makefile.macos  (make -f Makefile.macos all)
 #   - Windows -> pakai build_windows.bat (tidak perlu "make" sama sekali)
 #
-# Semua hasil build (binary + config) masuk ke folder dist/.
+# Hasil build (binary + config) masuk ke folder dist/.
 # Tidak ada target "install" -- jalankan langsung dari dist/.
 # ---------------------------------------------------------------
 
@@ -23,29 +23,20 @@ COMMON_SRCS := \
     $(SRCDIR)/device_mapper.cpp \
     $(SRCDIR)/app_core.cpp
 
-CLI_SRCS := $(COMMON_SRCS) $(SRCDIR)/cli_ui.cpp $(SRCDIR)/main.cpp
 GUI_SRCS := $(COMMON_SRCS) $(SRCDIR)/gui_ui.cpp $(SRCDIR)/main.cpp
-
-CLI_LIBS := -lhidapi-hidraw -ludev -lncurses
 GUI_LIBS := -lhidapi-hidraw -ludev $(GTK_LIBS)
 
-TARGET_CLI := usbrelay-cli
 TARGET_GUI := usbrelay-gui
 
-.PHONY: all cli gui clean deps install-udev dist-assets
+.PHONY: all gui clean deps install-udev dist-assets
 
-all: cli gui
+all: gui
 
 # Siapkan folder dist/ + salin config supaya dist/ bisa langsung dipakai
 # tanpa perlu file lain dari repo ini.
 dist-assets:
 	@mkdir -p $(OBJDIR) $(DISTDIR)
 	@cp -r config $(DISTDIR)/ 2>/dev/null || true
-
-cli: dist-assets $(CLI_SRCS)
-	$(CXX) $(CXXFLAGS) \
-		-o $(DISTDIR)/$(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
-	@echo "==> Build CLI selesai: $(DISTDIR)/$(TARGET_CLI)"
 
 gui: dist-assets $(GUI_SRCS)
 	$(CXX) $(CXXFLAGS) $(GTK_CFLAGS) -DUSE_GUI \
@@ -58,7 +49,6 @@ deps:
 	    libhidapi-dev \
 	    libhidapi-hidraw0 \
 	    libudev-dev \
-	    libncurses-dev \
 	    libgtk-3-dev \
 	    pkg-config \
 	    build-essential

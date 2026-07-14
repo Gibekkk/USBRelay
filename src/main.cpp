@@ -4,20 +4,15 @@
 #include <cstring>
 #include <cstdlib>
 
-#if defined(_WIN32) && defined(USE_GUI)
+#if defined(_WIN32)
 // usbrelay-gui.exe dibuild dengan -mwindows (tanpa console), jadi
 // std::cerr tidak terlihat kalau gagal dobel-klik -- tampilkan MessageBox
 // juga supaya error tidak "hilang" begitu saja.
 #include <windows.h>
 #endif
 
-// Deklarasi dari cli_ui.cpp dan gui_ui.cpp
-#ifdef USE_GUI
-// Hapus guard, tinggal:
+// Deklarasi dari gui_ui.cpp
 void run_gui(AppCore& core, int argc, char* argv[]);
-#else
-void run_cli(AppCore &core, const std::string &configPath);
-#endif
 
 static void printUsage(const char *prog)
 {
@@ -25,8 +20,6 @@ static void printUsage(const char *prog)
         << "Penggunaan:\n"
         << "  " << prog << " [OPSI]\n\n"
         << "OPSI:\n"
-        << "  --cli              Jalankan mode terminal (ncurses) [default]\n"
-        << "  --gui              Jalankan mode GUI (GTK3)\n"
         << "  --config FILE      Path file konfigurasi device map\n"
         << "                     Default: ./config/device_map.conf\n"
         << "  --channels N       Paksa jumlah channel relay (1-8), lewati\n"
@@ -34,8 +27,7 @@ static void printUsage(const char *prog)
         << "                     start -- bukan file config yang perlu diedit.\n"
         << "  --help             Tampilkan pesan ini\n\n"
         << "Contoh:\n"
-        << "  " << prog << " --cli --config /etc/usbrelay/rules.conf\n"
-        << "  " << prog << " --gui\n"
+        << "  " << prog << " --config /etc/usbrelay/rules.conf\n"
         << "\nFormat config:\n"
         << "  VID:PID  CHANNEL  ACTION  [LABEL]\n"
         << "  Contoh:\n"
@@ -45,17 +37,12 @@ static void printUsage(const char *prog)
 
 int main(int argc, char *argv[])
 {
-    bool useGUI = false;
     std::string configPath = "config/device_map.conf";
     int channelOverride = 0;
 
     for (int i = 1; i < argc; i++)
     {
-        if (strcmp(argv[i], "--gui") == 0)
-            useGUI = true;
-        else if (strcmp(argv[i], "--cli") == 0)
-            useGUI = false;
-        else if (strcmp(argv[i], "--help") == 0)
+        if (strcmp(argv[i], "--help") == 0)
         {
             printUsage(argv[0]);
             return 0;
@@ -76,7 +63,7 @@ int main(int argc, char *argv[])
     if (!core.init(configPath))
     {
         std::cerr << "[ERROR] Gagal inisialisasi. Pastikan libhidapi dan libudev tersedia.\n";
-#if defined(_WIN32) && defined(USE_GUI)
+#if defined(_WIN32)
         MessageBoxA(nullptr,
             "Gagal inisialisasi USB Relay Auto-Control.\n"
             "Pastikan DLL hidapi tersedia (jalankan dari folder dist\\ apa adanya).",
@@ -87,24 +74,7 @@ int main(int argc, char *argv[])
     if (channelOverride > 0)
         core.setChannelCountOverride(channelOverride);
 
-    if (useGUI)
-    {
-#ifdef USE_GUI
-        run_gui(core, argc, argv);
-#else
-        std::cerr << "[ERROR] Binary ini tidak mendukung GUI. Gunakan usbrelay-gui.\n";
-        return 1;
-#endif
-    }
-    else
-    {
-#ifdef USE_GUI
-        std::cerr << "[ERROR] Binary ini tidak mendukung CLI. Gunakan usbrelay-cli.\n";
-        return 1;
-#else
-        run_cli(core, configPath);
-#endif
-    }
+    run_gui(core, argc, argv);
 
     core.shutdown();
     return 0;

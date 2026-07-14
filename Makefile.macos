@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------
-# Makefile khusus macOS.
+# Makefile khusus macOS (GUI-only).
 #
 # Pakai file ini (bukan Makefile biasa) di Mac:
 #   make -f Makefile.macos deps      # install dependency lewat Homebrew
-#   make -f Makefile.macos all       # build CLI + GUI
+#   make -f Makefile.macos all       # build GUI
 #
 # Kalau mau, boleh juga symlink/rename supaya bisa "make" polos:
 #   ln -sf Makefile.macos Makefile
@@ -21,7 +21,7 @@ DISTDIR  := dist
 # (brew shellenv). Kalau pkg-config belum ada di PATH, jalankan dulu:
 #   eval "$(brew shellenv)"
 HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null)
-PKG_CONFIG_PATH := $(HOMEBREW_PREFIX)/lib/pkgconfig:$(HOMEBREW_PREFIX)/opt/ncurses/lib/pkgconfig
+PKG_CONFIG_PATH := $(HOMEBREW_PREFIX)/lib/pkgconfig
 
 HIDAPI_CFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags hidapi 2>/dev/null)
 HIDAPI_LIBS   := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   hidapi 2>/dev/null)
@@ -37,28 +37,18 @@ COMMON_SRCS := \
     $(SRCDIR)/device_mapper.cpp \
     $(SRCDIR)/app_core.cpp
 
-CLI_SRCS := $(COMMON_SRCS) $(SRCDIR)/cli_ui.cpp $(SRCDIR)/main.cpp
 GUI_SRCS := $(COMMON_SRCS) $(SRCDIR)/gui_ui.cpp $(SRCDIR)/main.cpp
-
-# ncurses bawaan macOS (Xcode Command Line Tools) sudah cukup, tidak perlu Homebrew
-CLI_LIBS := $(HIDAPI_LIBS) $(FRAMEWORKS) -lncurses
 GUI_LIBS := $(HIDAPI_LIBS) $(FRAMEWORKS) $(GTK_LIBS)
 
-TARGET_CLI := usbrelay-cli
 TARGET_GUI := usbrelay-gui
 
-.PHONY: all cli gui clean deps dist-assets
+.PHONY: all gui clean deps dist-assets
 
-all: cli gui
+all: gui
 
 dist-assets:
 	@mkdir -p $(OBJDIR) $(DISTDIR)
 	@cp -r config $(DISTDIR)/ 2>/dev/null || true
-
-cli: dist-assets $(CLI_SRCS)
-	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) \
-		-o $(DISTDIR)/$(TARGET_CLI) $(CLI_SRCS) $(CLI_LIBS)
-	@echo "==> Build CLI selesai: $(DISTDIR)/$(TARGET_CLI)"
 
 gui: dist-assets $(GUI_SRCS)
 	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) $(GTK_CFLAGS) -DUSE_GUI \

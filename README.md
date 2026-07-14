@@ -1,7 +1,7 @@
 # USB Relay Auto-Control
 
 Aplikasi C++ untuk kontrol USB relay secara otomatis berdasarkan deteksi USB device.
-Tersedia mode CLI (ncurses/PDCurses) dan GUI (GTK3).
+Tersedia dalam mode GUI (GTK3).
 
 Sudah bisa dibangun (build) untuk **Linux**, **macOS**, dan **Windows**. Kode
 inti (relay_controller, device_mapper, app_core) sama persis di ketiga OS;
@@ -28,7 +28,7 @@ DeviceMapper mencocokkan VID:PID dengan aturan di config
 RelayController (hidapi) mengeksekusi perintah ke relay
       │
       ▼
-UI (CLI/GUI) update tampilan status
+GUI update tampilan status
 ```
 
 ---
@@ -39,14 +39,11 @@ UI (CLI/GUI) update tampilan status
 sudo apt-get install -y \
     libhidapi-dev libhidapi-hidraw0 \
     libudev-dev \
-    libncurses-dev \
     libgtk-3-dev \
     pkg-config build-essential
 # atau: make deps
 
-make all      # Build keduanya (CLI + GUI) -> dist/
-make cli      # Hanya CLI  -> dist/usbrelay-cli
-make gui      # Hanya GUI  -> dist/usbrelay-gui
+make all      # Build GUI -> dist/usbrelay-gui
 make clean    # Hapus build/ dan dist/
 ```
 
@@ -74,10 +71,8 @@ framework yang dipakai beda dari Linux (IOKit, bukan libudev).
 make -f Makefile.macos deps
 #    (ini setara: brew install hidapi gtk+3 pkg-config)
 
-# 3) Build -> dist/
-make -f Makefile.macos all      # CLI + GUI
-make -f Makefile.macos cli      # Hanya CLI
-make -f Makefile.macos gui      # Hanya GUI
+# 3) Build -> dist/usbrelay-gui
+make -f Makefile.macos all
 ```
 
 Kalau mau bisa ketik `make` polos, symlink dulu:
@@ -87,9 +82,9 @@ make all
 ```
 
 **Catatan macOS:** hidapi di Mac mengakses HID device lewat IOKit, jadi saat
-`dist/usbrelay-cli`/`dist/usbrelay-gui` pertama kali dijalankan, macOS bisa
-minta izin **Input Monitoring** (System Settings → Privacy & Security →
-Input Monitoring). Aktifkan izinnya lalu jalankan ulang programnya.
+`dist/usbrelay-gui` pertama kali dijalankan, macOS bisa minta izin
+**Input Monitoring** (System Settings → Privacy & Security → Input
+Monitoring). Aktifkan izinnya lalu jalankan ulang programnya.
 
 ---
 
@@ -97,8 +92,8 @@ Input Monitoring). Aktifkan izinnya lalu jalankan ulang programnya.
 
 **Tidak butuh `make` sama sekali** -- cukup `g++` dari MSYS2. Ini sengaja
 supaya tidak error seperti kalau pakai Makefile langsung di Windows (banyak
-instalasi Windows tidak punya `make`, dan path library GTK/hidapi/ncurses
-juga beda formatnya dari Unix).
+instalasi Windows tidak punya `make`, dan path library GTK/hidapi juga beda
+formatnya dari Unix).
 
 1. Install [MSYS2](https://www.msys2.org/).
 2. Buka terminal **"MSYS2 MinGW64"** (bukan "MSYS2 MSYS" / "MSYS2 UCRT64"),
@@ -110,44 +105,19 @@ juga beda formatnya dari Unix).
        mingw-w64-x86_64-gcc \
        mingw-w64-x86_64-pkgconf \
        mingw-w64-x86_64-hidapi \
-       mingw-w64-x86_64-pdcurses \
        mingw-w64-x86_64-gtk3
    ```
-3. Dari Command Prompt / File Explorer (boleh di luar MSYS2), jalankan
-   `build_windows.bat` di folder project ini (double-click atau
-   `build_windows.bat` di cmd).
+3. Dari Command Prompt / PowerShell (boleh di luar MSYS2), jalankan
+   `build_windows.bat` di folder project ini.
    - Script otomatis mendeteksi `g++` dari `C:\msys64\mingw64\bin`.
    - Kalau MSYS2 diinstall bukan di `C:\msys64`, set environment variable
      `MSYS2_MINGW64_BIN` ke folder `...\mingw64\bin` sebelum menjalankan.
-4. Hasil build: `dist\usbrelay-cli.exe`, `dist\usbrelay-gui.exe`, dan
-   `dist\config\device_map.conf` langsung muncul di folder `dist\` --
-   tinggal dijalankan / didistribusikan sebagai satu folder.
-
-### Perbaikan pada `build_windows.bat` (build sebelumnya gagal)
-
-Ada dua bug lama di script ini:
-
-1. **Build CLI selalu gagal** (`curses.h: No such file or directory`).
-   Paket `mingw-w64-x86_64-pdcurses` di MSYS2 memasang headernya di
-   `mingw64\include\pdcurses\curses.h`, bukan langsung di
-   `mingw64\include\curses.h`, dan tidak punya file `pkg-config` -- jadi
-   script lama tidak pernah tahu harus menambahkan `-I` ke folder itu.
-   Sudah diperbaiki: script menambahkan `-I"<mingw64>\include\pdcurses"`
-   secara eksplisit sebelum build CLI.
-
-2. **Error `"...\Common was unexpected at this time."`** saat g++ belum
-   ada di PATH. Script lama menjalankan `set PATH=%MINGW_BIN%;%PATH%` di
-   dalam blok `if (...)`. PATH bawaan Windows hampir selalu berisi tanda
-   kurung (mis. `Program Files (x86)`, `Common Files`), dan tanda kurung
-   itu membuat parser `cmd.exe` salah baca sebagai penutup blok `if`.
-   Sudah diperbaiki pakai delayed expansion (`!PATH!`), dan blok build GUI
-   diubah ke `goto` supaya tidak rentan bug yang sama.
-
-Selain itu, `dist\usbrelay-gui.exe` dibuild dengan `-mwindows` (tanpa jendela
-console), jadi kalau dulu gagal start karena hidapi/config tidak ketemu,
-tidak ada pesan error yang terlihat sama sekali -- programnya seperti
-"diam saja". Sekarang ditambahkan `MessageBox` sebagai pengganti pesan error
-supaya tetap terlihat walau dijalankan lewat double-click.
+   - Script juga memaksa `PKG_CONFIG_PATH` ke folder MSYS2 secara eksplisit,
+     supaya tetap benar walau ada `pkg-config` lain di PATH (misalnya dari
+     Anaconda/Conda) yang tidak tahu-menahu soal MSYS2.
+4. Hasil build: `dist\usbrelay-gui.exe` dan `dist\config\device_map.conf`
+   langsung muncul di folder `dist\` -- tinggal dijalankan / didistribusikan
+   sebagai satu folder.
 
 **Catatan Windows:**
 - Kalau `dist\usbrelay-gui.exe` dijalankan lewat double-click dan gagal start
@@ -157,6 +127,10 @@ supaya tetap terlihat walau dijalankan lewat double-click.
   sebelum didistribusikan ke komputer lain.
 - Tidak perlu udev rule (itu khusus Linux) -- device HID pada Windows sudah
   bisa diakses lewat hidapi tanpa driver tambahan untuk board `16c0:05df`.
+- `dist\usbrelay-gui.exe` dibuild dengan `-mwindows` (tanpa jendela console),
+  jadi kalau gagal start karena hidapi/config tidak ketemu, program akan
+  menampilkan `MessageBox` sebagai pengganti pesan error di terminal, supaya
+  tetap terlihat walau dijalankan lewat double-click.
 
 ---
 
@@ -165,20 +139,17 @@ supaya tetap terlihat walau dijalankan lewat double-click.
 ```bash
 cd dist
 
-# Mode CLI (default)
-./usbrelay-cli                 # Windows: usbrelay-cli.exe
+# Jalankan GUI
+./usbrelay-gui                 # Windows: usbrelay-gui.exe
 
-# Mode CLI dengan config custom
-./usbrelay-cli --config /path/ke/rules.conf
-
-# Mode GUI
-./usbrelay-gui --gui           # Windows: usbrelay-gui.exe --gui
+# Dengan config custom
+./usbrelay-gui --config /path/ke/rules.conf
 
 # Paksa jumlah channel (opsional, kalau auto-detect salah tebak)
-./usbrelay-cli --channels 4
+./usbrelay-gui --channels 4
 
 # Tampilkan bantuan
-./usbrelay-cli --help
+./usbrelay-gui --help
 ```
 
 Default `--config` adalah `config/device_map.conf` **relatif terhadap folder
@@ -189,9 +160,9 @@ tanpa opsi tambahan.
 ## Deteksi Jumlah Channel Relay (Otomatis)
 
 Saat relay terhubung, jumlah channel dideteksi **otomatis** dari serial
-number / product string HID -- tombolnya di GUI/CLI dibuat dinamis sesuai
-hasil deteksi ini (tidak ada jumlah channel yang di-hardcode). Urutan
-deteksi, dari yang paling dipercaya:
+number / product string HID -- tombol di GUI dibuat dinamis sesuai hasil
+deteksi ini (tidak ada jumlah channel yang di-hardcode). Urutan deteksi,
+dari yang paling dipercaya:
 
 1. Pola eksplisit di product string, mis. `USBRelay4`, `LCUS-2` → langsung
    diambil angkanya.
@@ -207,18 +178,6 @@ tidak ada cara membaca itu langsung dari device. Heuristik di atas
 menutup sebagian besar kasus tanpa perlu edit file apa pun. Untuk kasus
 langka yang tetap salah tebak, pakai flag `--channels N` sekali saat
 menjalankan program (bukan file config yang perlu di-maintain).
-
-## Tombol CLI
-
-| Tombol | Fungsi                   |
-|--------|--------------------------|
-| Q      | Keluar                   |
-| R      | Scan & connect relay     |
-| C      | Connect relay            |
-| D      | Disconnect relay         |
-| A      | Semua channel ON         |
-| Z      | Semua channel OFF        |
-| 1-8    | Toggle channel 1-8       |
 
 ## Konfigurasi Device Map
 
@@ -272,15 +231,13 @@ usbrelay-autocontrol/
 ├── config/
 │   └── device_map.conf      ← aturan VID:PID -> relay channel (sumber, disalin ke dist/config/ saat build)
 ├── dist/                    ← HASIL BUILD (dibuat otomatis, gitignore)
-│   ├── usbrelay-cli(.exe)
 │   ├── usbrelay-gui(.exe)
 │   └── config/device_map.conf
 └── src/
-    ├── main.cpp              ← entry point, parse --cli/--gui
+    ├── main.cpp              ← entry point, parse argumen (--config/--channels/--help)
     ├── relay_controller.h/cpp ← kontrol relay via hidapi (sama di 3 OS)
     ├── usb_monitor.h/cpp     ← monitor USB (libudev/IOKit/SetupAPI sesuai OS)
     ├── device_mapper.h/cpp   ← parsing config & rule matching
     ├── app_core.h/cpp        ← business logic utama
-    ├── cli_ui.cpp            ← TUI ncurses (Linux/macOS) / PDCurses (Windows)
     └── gui_ui.cpp            ← GUI GTK3
 ```
