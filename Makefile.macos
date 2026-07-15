@@ -28,9 +28,9 @@ DISTDIR  := dist
 HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 PKG_CONFIG_PATH := $(HOMEBREW_PREFIX)/lib/pkgconfig
 
-HIDAPI_CFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags hidapi 2>/dev/null)
+HIDAPI_CFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --cflags hidapi 2>/dev/null)
 HIDAPI_LIBS   := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   hidapi 2>/dev/null)
-GTK_CFLAGS    := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags gtk+-3.0 2>/dev/null)
+GTK_CFLAGS    := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --cflags gtk+-3.0 2>/dev/null)
 GTK_LIBS      := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   gtk+-3.0 2>/dev/null)
 
 # usb_monitor.cpp di macOS pakai IOKit (bukan libudev seperti di Linux)
