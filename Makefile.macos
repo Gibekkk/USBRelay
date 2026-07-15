@@ -33,6 +33,15 @@ HIDAPI_LIBS   := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   
 GTK_CFLAGS    := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --cflags gtk+-3.0 2>/dev/null)
 GTK_LIBS      := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs   gtk+-3.0 2>/dev/null)
 
+# Fallback: tambahkan juga path hidapi langsung dari `brew --prefix
+# hidapi`, DITAMBAHKAN (bukan cuma dipakai saat pkg-config kosong) --
+# soalnya pkg-config bisa saja balikin path LAMA/basi kalau hidapi
+# baru saja ke-reinstall/upgrade sama brew (mis. abis `brew install
+# gtk` yang memicu upgrade dependency lain). -I dobel tidak masalah.
+HIDAPI_PREFIX := $(shell brew --prefix hidapi 2>/dev/null)
+HIDAPI_CFLAGS += -I$(HIDAPI_PREFIX)/include/hidapi -I$(HIDAPI_PREFIX)/include
+HIDAPI_LIBS   += -L$(HIDAPI_PREFIX)/lib -lhidapi
+
 # usb_monitor.cpp di macOS pakai IOKit (bukan libudev seperti di Linux)
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
