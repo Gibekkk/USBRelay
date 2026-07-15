@@ -59,7 +59,7 @@ bool DeviceMapper::saveConfig(const std::string& path) const {
     if (!f.is_open()) return false;
     f << "# USB Relay Auto-Control - Konfigurasi Device\n"
       << "# Format: VID:PID  CHANNEL  ACTION  [LABEL]\n"
-      << "# CHANNEL : 1-8 atau 'all'\n"
+      << "# CHANNEL : 1-16 atau 'all'\n"
       << "# ACTION  : open_on_connect | close_on_connect\n\n";
     for (auto& r : m_rules) {
         std::string ch  = (r.relay_channel == 0) ? "all" : std::to_string(r.relay_channel);

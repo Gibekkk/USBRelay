@@ -38,8 +38,8 @@ public:
 
     bool setChannel(int ch, bool on);
     bool setAll(bool on);
-    uint8_t getStatus();
-    void setLastStatus(uint8_t s);
+    uint16_t getStatus();
+    void setLastStatus(uint16_t s);
 
     // Scan semua metode baca, return log string, update m_last_status
     std::vector<std::string> scanStatus();
@@ -50,7 +50,19 @@ private:
     hid_device* m_device      = nullptr;
     RelayInfo   m_info;
     bool        m_initialized = false;
-    uint8_t     m_last_status = 0;
+    // uint16_t (bukan uint8_t) supaya bisa menampung status sampai 16
+    // channel (lihat config/channels.conf -- channel aktif bisa 1-16).
+    uint16_t    m_last_status = 0;
     int         m_status_method = -1; // metode yang berhasil
     int         m_channel_override = 0; // 0 = pakai hasil auto-detect enumerate()
+
+    // Board relay clone (terutama di Windows) kadang gagal sesekali saat
+    // dibaca statusnya (hid_get_feature_report/hid_read_timeout) walau
+    // device sebenarnya masih terhubung baik-baik saja -- ini lumrah untuk
+    // firmware murah, BUKAN berarti device benar-benar lepas. Supaya tidak
+    // dianggap "terputus" gara-gara satu kali gagal baca (yang bikin GUI
+    // reconnect loop terus-menerus tanpa pernah stabil), device baru
+    // ditutup setelah gagal MAX_STATUS_FAILS kali BERTURUT-TURUT.
+    static constexpr int kMaxStatusFails = 3;
+    int         m_status_fail_count = 0;
 };

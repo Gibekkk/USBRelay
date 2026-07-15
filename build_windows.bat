@@ -62,8 +62,11 @@ set CXXFLAGS=-std=c++17 -Wall -Wextra -O2
 set SRCDIR=src
 set DISTDIR=dist
 
+REM Config (config\device_map.conf, config\channels.conf) TIDAK lagi
+REM disalin ke dist\ -- usbrelay-gui.exe membacanya langsung dari
+REM ..\config\ (relatif dist\, folder config\ di root project).
+REM data.csv juga TIDAK disalin -- sudah permanen ada di dist\data.csv.
 if not exist %DISTDIR% mkdir %DISTDIR%
-xcopy /Y /I /E /Q config %DISTDIR%\config >nul
 
 set GUI_SRCS=%SRCDIR%\relay_controller.cpp %SRCDIR%\usb_monitor.cpp %SRCDIR%\device_mapper.cpp %SRCDIR%\app_core.cpp %SRCDIR%\gui_ui.cpp %SRCDIR%\main.cpp
 
@@ -109,7 +112,8 @@ if errorlevel 1 (
 echo       -^> %DISTDIR%\usbrelay-gui.exe selesai.
 
 echo.
-echo [OK] Build selesai. File ada di folder %DISTDIR%\ (exe + config\).
+echo [OK] Build selesai. File ada di folder %DISTDIR%\ (exe + data.csv).
+echo      Config dibaca dari ..\config\ (relatif dist\, folder config\ di root project).
 echo      Jalankan dobel-klik %DISTDIR%\usbrelay-gui.exe
 
 endlocal

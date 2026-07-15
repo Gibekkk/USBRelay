@@ -20,7 +20,7 @@ struct AppEvent {
     Type        type;
     std::string message;
     USBDevice   usb_device;
-    uint8_t     relay_status = 0;
+    uint16_t    relay_status = 0;
 };
 
 class AppCore {
@@ -41,7 +41,7 @@ public:
 
     std::vector<RelayInfo>  getRelayDevices();
     std::vector<USBDevice>  getUSBDevices();
-    uint8_t                 getRelayStatus();
+    uint16_t                 getRelayStatus();
     bool                    isRelayConnected() const;
     RelayInfo               getRelayInfo() const;
     DeviceMapper&           getMapper() { return m_mapper; }

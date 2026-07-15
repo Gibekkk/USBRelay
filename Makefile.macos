@@ -7,6 +7,11 @@
 #
 # Kalau mau, boleh juga symlink/rename supaya bisa "make" polos:
 #   ln -sf Makefile.macos Makefile
+#
+# Config (config/device_map.conf, config/channels.conf) TIDAK disalin
+# ke dist/ -- binary membacanya langsung dari ../config/ (relatif
+# dist/). data.csv juga TIDAK disalin -- sudah permanen ada di
+# dist/data.csv (lihat catatan di Makefile Linux untuk alasannya).
 # ---------------------------------------------------------------
 
 CXX      := clang++
@@ -48,16 +53,19 @@ all: gui
 
 dist-assets:
 	@mkdir -p $(OBJDIR) $(DISTDIR)
-	@cp -r config $(DISTDIR)/ 2>/dev/null || true
 
 gui: dist-assets $(GUI_SRCS)
 	$(CXX) $(CXXFLAGS) $(HIDAPI_CFLAGS) $(GTK_CFLAGS) -DUSE_GUI \
 		-o $(DISTDIR)/$(TARGET_GUI) $(GUI_SRCS) $(GUI_LIBS)
 	@echo "==> Build GUI selesai: $(DISTDIR)/$(TARGET_GUI)"
+	@echo "==> Config dibaca dari ../config/ (relatif dist/); data.csv sudah ada di dist/."
 
 # Install dependency lewat Homebrew (https://brew.sh)
 deps:
 	brew install hidapi gtk+3 pkg-config
 
+# Cuma hapus hasil kompilasi -- TIDAK menghapus seluruh dist/ (lihat
+# catatan clean di Makefile Linux).
 clean:
-	rm -rf $(OBJDIR) $(DISTDIR)
+	rm -rf $(OBJDIR)
+	rm -f $(DISTDIR)/$(TARGET_GUI)

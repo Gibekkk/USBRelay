@@ -1,4 +1,5 @@
 git pull
 make clean
 make all
-./dist/usbrelay-gui
+cd dist
+./usbrelay-gui

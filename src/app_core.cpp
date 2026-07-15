@@ -108,10 +108,10 @@ std::vector<USBDevice>  AppCore::getUSBDevices()          { return m_monitor.get
 bool                    AppCore::isRelayConnected() const  { return m_relay.isOpen(); }
 RelayInfo               AppCore::getRelayInfo() const     { return m_relay.getInfo(); }
 
-uint8_t AppCore::getRelayStatus() {
+uint16_t AppCore::getRelayStatus() {
     std::lock_guard<std::mutex> lk(m_relayMtx);
     if (!m_relay.isOpen()) return 0;
-    uint8_t s = m_relay.getStatus();
+    uint16_t s = m_relay.getStatus();
     // Jika read gagal berkali-kali, relay mungkin sudah dicabut
     return s;
 }

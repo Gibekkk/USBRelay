@@ -3,8 +3,16 @@
 #   - macOS   -> pakai Makefile.macos  (make -f Makefile.macos all)
 #   - Windows -> pakai build_windows.bat (tidak perlu "make" sama sekali)
 #
-# Hasil build (binary + config) masuk ke folder dist/.
-# Tidak ada target "install" -- jalankan langsung dari dist/.
+# Hasil build (binary) masuk ke folder dist/. Tidak ada langkah
+# "install" -- jalankan langsung dari dist/ ("cd dist && ./usbrelay-gui").
+#
+# Config (config/device_map.conf, config/channels.conf) TIDAK lagi
+# disalin ke dist/ saat build -- binary membacanya langsung dari
+# ../config/ (relatif terhadap dist/, yaitu folder config/ di root
+# project ini). data.csv juga TIDAK disalin -- filenya sudah permanen
+# ada di dalam dist/ (lihat dist/data.csv), supaya folder dist/ gampang
+# di-porting/copy ke tempat lain sebagai satu paket lengkap (binary +
+# data.csv) tanpa perlu file config terpisah.
 # ---------------------------------------------------------------
 
 CXX      := g++
@@ -32,16 +40,16 @@ TARGET_GUI := usbrelay-gui
 
 all: gui
 
-# Siapkan folder dist/ + salin config supaya dist/ bisa langsung dipakai
-# tanpa perlu file lain dari repo ini.
+# Pastikan folder build/ dan dist/ ada. TIDAK menyalin apa pun ke
+# dalamnya lagi (lihat catatan di atas) -- cuma memastikan foldernya ada.
 dist-assets:
 	@mkdir -p $(OBJDIR) $(DISTDIR)
-	@cp -r config $(DISTDIR)/ 2>/dev/null || true
 
 gui: dist-assets $(GUI_SRCS)
 	$(CXX) $(CXXFLAGS) $(GTK_CFLAGS) -DUSE_GUI \
 		-o $(DISTDIR)/$(TARGET_GUI) $(GUI_SRCS) $(GUI_LIBS)
 	@echo "==> Build GUI selesai: $(DISTDIR)/$(TARGET_GUI)"
+	@echo "==> Config dibaca dari ../config/ (relatif dist/); data.csv sudah ada di dist/."
 
 # Install dependencies (Debian/Ubuntu)
 deps:
@@ -61,5 +69,10 @@ install-udev:
 	sudo udevadm trigger
 	@echo "==> udev rule dipasang. Cabut & pasang kembali relay."
 
+# Cuma hapus hasil kompilasi (build/ dan binary-nya) -- TIDAK menghapus
+# seluruh dist/ lagi, karena dist/ sekarang juga menyimpan data.csv,
+# usage.csv, dan logs/ yang bukan hasil build (jangan sampai hilang
+# gara-gara "make clean").
 clean:
-	rm -rf $(OBJDIR) $(DISTDIR)
+	rm -rf $(OBJDIR)
+	rm -f $(DISTDIR)/$(TARGET_GUI)

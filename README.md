@@ -1,7 +1,7 @@
 # USB Relay Auto-Control
 
-Aplikasi C++ untuk kontrol USB relay secara otomatis berdasarkan deteksi USB device.
-Tersedia dalam mode GUI (GTK3).
+Aplikasi C++ untuk kontrol USB relay, dipakai untuk menyalakan/mematikan
+"box" (channel relay) berdasarkan scan NIM. Tersedia dalam mode GUI (GTK3).
 
 Sudah bisa dibangun (build) untuk **Linux**, **macOS**, dan **Windows**. Kode
 inti (relay_controller, device_mapper, app_core) sama persis di ketiga OS;
@@ -9,11 +9,33 @@ yang beda hanya lapisan deteksi USB (`usb_monitor.cpp`, otomatis pilih
 implementasi lewat `#if defined(...)` -- libudev di Linux, IOKit di macOS,
 SetupAPI di Windows) dan build system.
 
-**Semua hasil build masuk ke folder `dist/`** -- tidak ada langkah "install"
-ke sistem. Tinggal jalankan langsung dari `dist/`, atau copy folder itu ke
-mana pun.
+**Hasil build (binary) masuk ke folder `dist/`** -- tidak ada langkah
+"install" ke sistem. Tinggal jalankan langsung dari `dist/`. Folder `dist/`
+juga menyimpan `data.csv` (database NIM → nama) secara permanen, supaya
+folder ini gampang di-copy/porting sebagai satu paket lengkap ke komputer
+lain -- lihat bagian **"File Data Runtime"** di bawah untuk detail lengkap
+soal tata letak file.
+
+## Fitur Utama
+
+- **Round-robin otomatis**: tidak perlu pilih channel manual lagi. Setiap
+  ada NIM baru discan, aplikasi otomatis memakai channel **kosong bernomor
+  terkecil** (mis. CH1 dulu, baru CH2, dst) dari daftar channel yang
+  diaktifkan di `config/channels.conf`.
+- **Nama pengguna ditampilkan**, bukan cuma NIM -- tombol channel yang
+  aktif menampilkan nama orang yang sedang memakainya (diambil dari
+  `data.csv`).
+- **Durasi pemakaian real-time** -- tombol channel yang aktif juga
+  menampilkan sudah berapa lama channel itu dipakai, dihitung dari
+  timestamp `waktu_on` di `usage.csv`.
+- **Channel yang dipakai bisa diatur lewat config** (1-16 channel) --
+  lihat `config/channels.conf`. Jumlah tombol di GUI otomatis mengikuti
+  berapa banyak channel yang kamu aktifkan di sana.
 
 ## Cara Kerja
+
+Alur auto-control relay berdasarkan USB device lain yang dipasang/dicabut
+(mis. mouse, USB LAN) diatur lewat `config/device_map.conf`:
 
 ```
 USB Device dipasang
@@ -22,13 +44,33 @@ USB Device dipasang
 USBMonitor mendeteksi event   (Linux: libudev · macOS: IOKit · Windows: SetupAPI)
       │
       ▼
-DeviceMapper mencocokkan VID:PID dengan aturan di config
+DeviceMapper mencocokkan VID:PID dengan aturan di config/device_map.conf
       │
       ▼
 RelayController (hidapi) mengeksekusi perintah ke relay
       │
       ▼
 GUI update tampilan status
+```
+
+Alur utama sehari-hari, scan NIM lewat panel "Cari NIM" di GUI, mengikuti
+sistem round-robin:
+
+```
+NIM discan
+      │
+      ▼
+Cari NIM di data.csv -> dapat nama
+      │
+      ├── NIM ini SUDAH pakai sebuah channel (tercatat di usage.csv)?
+      │     └── YA -> channel itu dimatikan, baris dihapus dari usage.csv
+      │               (dicatat sebagai "OUT" di logs/ddmmyy.csv)
+      │
+      └── NIM ini BELUM pakai channel manapun?
+            └── YA -> pickNextAvailableChannel(): ambil channel KOSONG
+                      bernomor TERKECIL dari config/channels.conf,
+                      nyalakan, catat ke usage.csv (waktu_on = sekarang)
+                      (dicatat sebagai "IN" di logs/ddmmyy.csv)
 ```
 
 ---
@@ -44,12 +86,18 @@ sudo apt-get install -y \
 # atau: make deps
 
 make all      # Build GUI -> dist/usbrelay-gui
-make clean    # Hapus build/ dan dist/
+make clean    # Hapus folder build/ dan binary dist/usbrelay-gui
 ```
 
-Setiap kali build, folder `config/` otomatis disalin ke `dist/config/` supaya
-`dist/` bisa langsung dipakai berdiri sendiri (tidak perlu file lain dari
-repo ini).
+`make clean` **tidak lagi menghapus seluruh folder `dist/`** -- cuma hasil
+kompilasinya (`build/` dan binary-nya) yang dihapus. Ini sengaja, karena
+`dist/data.csv`, `dist/usage.csv`, dan `dist/logs/` sekarang menyimpan data
+yang tidak boleh hilang gara-gara rebuild.
+
+Config (`config/device_map.conf`, `config/channels.conf`) **tidak lagi
+disalin ke `dist/`** saat build -- binary membacanya langsung dari folder
+`config/` di root project (lewat path relatif `../config/`, lihat bagian
+**"File Data Runtime"**).
 
 ### Pasang udev Rule (agar tidak perlu sudo)
 
@@ -115,9 +163,9 @@ formatnya dari Unix).
    - Script juga memaksa `PKG_CONFIG_PATH` ke folder MSYS2 secara eksplisit,
      supaya tetap benar walau ada `pkg-config` lain di PATH (misalnya dari
      Anaconda/Conda) yang tidak tahu-menahu soal MSYS2.
-4. Hasil build: `dist\usbrelay-gui.exe` dan `dist\config\device_map.conf`
-   langsung muncul di folder `dist\` -- tinggal dijalankan / didistribusikan
-   sebagai satu folder.
+4. Hasil build: `dist\usbrelay-gui.exe` langsung muncul di folder `dist\`
+   (config **tidak** ikut disalin ke situ lagi -- lihat catatan di bagian
+   **"File Data Runtime"**).
 
 **Catatan Windows:**
 - Kalau `dist\usbrelay-gui.exe` dijalankan lewat double-click dan gagal start
@@ -142,27 +190,130 @@ cd dist
 # Jalankan GUI
 ./usbrelay-gui                 # Windows: usbrelay-gui.exe
 
-# Dengan config custom
+# Dengan config device map custom
 ./usbrelay-gui --config /path/ke/rules.conf
 
-# Paksa jumlah channel (opsional, kalau auto-detect salah tebak)
+# Dengan config channel aktif custom
+./usbrelay-gui --channels-config /path/ke/channels.conf
+
+# Paksa jumlah channel hasil auto-detect hardware (opsional, 1-16)
 ./usbrelay-gui --channels 4
 
 # Tampilkan bantuan
 ./usbrelay-gui --help
 ```
 
-Default `--config` adalah `config/device_map.conf` **relatif terhadap folder
-tempat binary dijalankan** -- karena itu `config/` selalu ikut disalin ke
-`dist/` saat build, supaya menjalankan langsung dari dalam `dist/` bekerja
-tanpa opsi tambahan.
+**Penting -- selalu jalankan dari dalam folder `dist/`** (`cd dist &&
+./usbrelay-gui`). Default path config sekarang adalah `../config/` (relatif
+terhadap folder tempat binary dijalankan), yaitu folder `config/` di root
+project ini, persis di sebelah folder `dist/`. Kalau `dist/` dipindah,
+folder `config/` harus ikut dipindah bersamanya (tetap sebagai folder
+sejajar) supaya path relatif ini tetap benar. `data.csv` tidak kena aturan
+ini -- filenya sudah permanen ada langsung di dalam `dist/`.
+
+---
+
+## Konfigurasi Channel Aktif (`config/channels.conf`)
+
+Ini file baru yang menentukan **channel mana saja (1-16) yang aktif dipakai
+aplikasi**:
+
+```
+# Satu nomor per baris, boleh koma, boleh range
+1-4
+```
+
+- Jumlah tombol yang tampil di GUI **otomatis menyesuaikan** panjang daftar
+  di file ini -- aktifkan 4 channel, muncul 4 tombol; aktifkan 16, muncul
+  16 tombol.
+- Channel di daftar ini jugalah yang dipakai sistem **round-robin**: setiap
+  ada NIM baru discan, channel **kosong bernomor terkecil** di daftar ini
+  yang dipakai lebih dulu (mis. kalau CH1-CH3 penuh dan CH4 kosong, CH4
+  yang dipakai -- user tidak perlu dan tidak bisa lagi memilih channel
+  manual).
+- Format per baris: satu nomor (`3`), banyak dipisah koma (`1,2,3,4`), atau
+  range (`1-4`, setara dengan `1,2,3,4`). Baris `#...` = komentar.
+- Kalau file tidak ada / kosong / semua baris invalid → fallback otomatis
+  ke channel 1-4.
+
+Contoh lain (edit `config/channels.conf` langsung):
+```
+# Relay 8 channel, semua dipakai
+1-8
+
+# Cuma channel tertentu, tidak harus berurutan
+1,3,5,7
+```
+
+Kalau nomor channel yang diaktifkan di sini lebih besar dari jumlah channel
+yang berhasil dideteksi otomatis dari hardware (lihat bagian **"Deteksi
+Jumlah Channel Relay"** di bawah), aplikasi tetap jalan tapi akan menulis
+peringatan di panel Log -- pastikan hardware kamu memang punya channel
+sebanyak itu.
+
+---
+
+## File Data Runtime (Penting!)
+
+Program ini membaca/menulis beberapa file **relatif terhadap folder tempat
+kamu menjalankan binary-nya** (current directory), bukan relatif ke lokasi
+source code:
+
+| File                          | Fungsi                                             | Lokasi default (relatif ke `dist/`) |
+|--------------------------------|-----------------------------------------------------|--------------------------------------|
+| `../config/device_map.conf`   | Aturan VID:PID → auto ON/OFF relay saat USB lain dipasang/dicabut | Dibaca langsung dari `config/` di root project, **tidak** disalin ke `dist/` |
+| `../config/channels.conf`     | Channel (1-16) yang aktif dipakai GUI + round-robin | Dibaca langsung dari `config/` di root project, **tidak** disalin ke `dist/` |
+| `data.csv`                    | Database NIM → nama (dipakai fitur scan NIM di GUI)  | Permanen di dalam `dist/data.csv`, sudah tidak ada salinan sumber di root |
+| `usage.csv`                   | Snapshot channel yang sedang dipakai (real-time), termasuk `waktu_on` untuk hitung durasi | Dibuat & diperbarui otomatis oleh program saat berjalan, di dalam `dist/` |
+| `logs/ddmmyy.csv`             | Riwayat harian IN/OUT (dibuat per hari)              | Folder `dist/logs/` dibuat otomatis oleh program |
+
+**Kenapa dipisah begini:** `config/` cukup satu lokasi (root project) supaya
+tidak ada kebingungan "yang mana yang asli" -- dulu ada dua salinan
+(`config/` dan `dist/config/`) yang gampang beda kalau salah satunya diedit
+langsung. `data.csv` sebaliknya, sengaja dibuat **satu-satunya** salinan di
+dalam `dist/` (bukan disalin dari root) supaya folder `dist/` bisa langsung
+di-copy/porting ke komputer lain sebagai satu paket utuh (binary + data
+NIM) tanpa perlu bawa file config terpisah.
+
+**Implikasi penting:** kalau kamu jalankan binary dari luar folder `dist/`
+(misalnya double-click dari lokasi lain, symlink, atau shortcut dengan
+"Start in" yang salah), program akan mencari `data.csv`/`../config/`
+relatif ke folder itu -- **bukan** ke lokasi yang sebenarnya. Kalau
+`data.csv` tidak ketemu, program **tidak akan menampilkan error** (gagal
+diam-diam) -- fitur pencarian NIM cuma akan selalu "tidak ditemukan" tanpa
+penjelasan.
+
+**Aturan aman:**
+- Selalu jalankan binary dari dalam folder `dist/` itu sendiri (`cd dist &&
+  ./usbrelay-gui`, atau di Windows pastikan shortcut-nya punya "Start in" =
+  folder `dist`).
+- Kalau memindahkan/mem-porting aplikasi ke komputer lain, salin folder
+  `config/` **dan** `dist/` bersama-sama sebagai dua folder sejajar (persis
+  struktur di repo ini) -- jangan cuma `dist/` saja, karena `device_map.conf`
+  dan `channels.conf` ada di `config/`, bukan di dalam `dist/`.
+- Untuk update `data.csv` (database NIM), edit langsung `dist/data.csv` --
+  file itu memang satu-satunya sumber sekarang, tidak perlu rebuild atau
+  sinkron dari tempat lain.
+
+---
+
+## Kenapa Kadang "Connect Lalu Putus Lagi" (Sudah Diperbaiki)
+
+Board relay clone `16c0:05df` (terutama di Windows) kadang gagal merespons
+satu kali saat statusnya dibaca (`hid_get_feature_report`), walau device
+sebenarnya baik-baik saja -- ini lumrah untuk firmware murah, bukan berarti
+device benar-benar lepas. Sebelumnya, satu kali gagal baca langsung membuat
+aplikasi menutup koneksi dan mengulang scan dari awal -- membuat relay
+terlihat "connect lalu putus lagi" terus-menerus tanpa pernah stabil.
+
+Sekarang aplikasi baru menganggap relay benar-benar terputus setelah gagal
+membaca status **3 kali berturut-turut** (`kMaxStatusFails` di
+`src/relay_controller.h`), bukan langsung pada kegagalan pertama.
 
 ## Deteksi Jumlah Channel Relay (Otomatis)
 
 Saat relay terhubung, jumlah channel dideteksi **otomatis** dari serial
-number / product string HID -- tombol di GUI dibuat dinamis sesuai hasil
-deteksi ini (tidak ada jumlah channel yang di-hardcode). Urutan deteksi,
-dari yang paling dipercaya:
+number / product string HID. Urutan deteksi, dari yang paling dipercaya:
 
 1. Pola eksplisit di product string, mis. `USBRelay4`, `LCUS-2` → langsung
    diambil angkanya.
@@ -174,14 +325,24 @@ dari yang paling dipercaya:
 
 **Catatan jujur:** protokol HID board relay `16c0:05df` (termasuk board
 clone) memang tidak punya field "jumlah channel" di hardware-nya —
-tidak ada cara membaca itu langsung dari device. Heuristik di atas
-menutup sebagian besar kasus tanpa perlu edit file apa pun. Untuk kasus
-langka yang tetap salah tebak, pakai flag `--channels N` sekali saat
-menjalankan program (bukan file config yang perlu di-maintain).
+tidak ada cara membaca itu langsung dari device. Heuristik di atas hanya
+bisa membaca **satu digit (1-9)**, jadi tidak bisa mendeteksi board >9
+channel secara otomatis dari nama/serial-nya. Untuk kasus itu (atau kalau
+heuristiknya salah tebak), pakai flag `--channels N` (1-16) sekali saat
+menjalankan program.
+
+**Hubungannya dengan `config/channels.conf`:** dua hal ini independen.
+Angka hasil auto-detect/`--channels` di atas cuma dipakai
+`RelayController::setAll()` untuk menghitung mask "semua channel ON/OFF".
+Channel mana yang benar-benar **muncul di GUI dan dipakai round-robin**
+ditentukan sepenuhnya oleh `config/channels.conf` -- keduanya tidak harus
+sama persis, tapi idealnya `channels.conf` tidak mengaktifkan channel yang
+lebih besar dari jumlah channel fisik hardware kamu.
 
 ## Konfigurasi Device Map
 
-Edit `dist/config/device_map.conf` (hasil salinan dari `config/`):
+Edit `config/device_map.conf` langsung (dibaca langsung dari sini, tidak
+ada lagi salinan di `dist/config/`):
 
 ```
 # Format: VID:PID  CHANNEL  ACTION  [LABEL]
@@ -195,6 +356,8 @@ Edit `dist/config/device_map.conf` (hasil salinan dari `config/`):
 # Flash drive tertentu -> semua relay ON
 0781:5567  all  open_on_connect  SanDisk Flash Drive
 ```
+
+CHANNEL boleh 1-16 atau `all`.
 
 Cari VID:PID device:
 ```bash
@@ -211,7 +374,11 @@ Hardware dengan VID:PID `16c0:05df` (ICSTATION, SainSmart, dll).
 Protokol HID standar:
 - Write byte 2 = `0x01` → OPEN relay
 - Write byte 2 = `0x02` → CLOSE relay
-- Write byte 3 = channel (1-8) atau `0xFF` untuk semua
+- Write byte 3 = nomor channel (tergantung hardware, umumnya 1-16) atau
+  `0x00` untuk semua
+
+Status internal aplikasi (`m_last_status`) memakai bitmask 16-bit supaya
+bisa menampung sampai 16 channel sekaligus.
 
 Jika relay kamu pakai VID:PID berbeda, ubah konstanta di:
 ```cpp
@@ -224,20 +391,25 @@ Jika relay kamu pakai VID:PID berbeda, ubah konstanta di:
 
 ```
 usbrelay-autocontrol/
-├── Makefile              ← build Linux      -> dist/
-├── Makefile.macos        ← build macOS      -> dist/
-├── build_windows.bat     ← build Windows (tanpa "make") -> dist/
+├── Makefile              ← build Linux      -> dist/usbrelay-gui
+├── Makefile.macos        ← build macOS      -> dist/usbrelay-gui
+├── build_windows.bat     ← build Windows (tanpa "make") -> dist/usbrelay-gui.exe
 ├── README.md
+├── update.sh             ← git pull + rebuild + jalankan dari dist/
+├── .gitignore            ← cuma ignore usage.csv & logs/ (data runtime/sesi)
 ├── config/
-│   └── device_map.conf      ← aturan VID:PID -> relay channel (sumber, disalin ke dist/config/ saat build)
-├── dist/                    ← HASIL BUILD (dibuat otomatis, gitignore)
-│   ├── usbrelay-gui(.exe)
-│   └── config/device_map.conf
+│   ├── device_map.conf      ← aturan VID:PID -> relay channel (dibaca langsung, TIDAK disalin ke dist/)
+│   └── channels.conf        ← channel (1-16) yang AKTIF dipakai GUI + round-robin (dibaca langsung, TIDAK disalin ke dist/)
+├── dist/                    ← hasil build (binary) + data.csv, DILACAK git
+│   ├── usbrelay-gui(.exe)   ← hasil build, tidak ikut dihapus oleh "make clean" versi lama
+│   ├── data.csv              ← database NIM -> nama, SATU-SATUNYA salinan (bukan disalin dari root lagi)
+│   ├── usage.csv             ← dibuat otomatis saat program jalan (runtime, di-gitignore)
+│   └── logs/                 ← dibuat otomatis saat program jalan (runtime, di-gitignore)
 └── src/
-    ├── main.cpp              ← entry point, parse argumen (--config/--channels/--help)
-    ├── relay_controller.h/cpp ← kontrol relay via hidapi (sama di 3 OS)
+    ├── main.cpp              ← entry point, parse argumen (--config/--channels-config/--channels/--help)
+    ├── relay_controller.h/cpp ← kontrol relay via hidapi (bitmask 16-bit, sama di 3 OS)
     ├── usb_monitor.h/cpp     ← monitor USB (libudev/IOKit/SetupAPI sesuai OS)
-    ├── device_mapper.h/cpp   ← parsing config & rule matching
+    ├── device_mapper.h/cpp   ← parsing config/device_map.conf & rule matching
     ├── app_core.h/cpp        ← business logic utama
-    └── gui_ui.cpp            ← GUI GTK3
+    └── gui_ui.cpp            ← GUI GTK3: round-robin, nama+durasi, config/channels.conf, usage.csv, data.csv, logs/
 ```
