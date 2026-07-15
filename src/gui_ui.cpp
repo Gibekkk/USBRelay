@@ -278,17 +278,18 @@ static time_t parseTimestamp(const std::string& ts) {
     return std::mktime(&tmv);
 }
 
-// Format durasi (detik) jadi teks singkat untuk label tombol, mis.
-// "45d" (detik), "12m" (menit), "2j 15m" (jam+menit).
+// Format durasi (detik) jadi HH:MM:SS (zero-padded), dipakai di label
+// tombol channel. Contoh: 45 detik -> "00:00:45", 1 jam 5 menit 3 detik
+// -> "01:05:03".
 static std::string formatDurationShort(long long secs) {
     if (secs < 0) secs = 0;
     long long h = secs / 3600;
     long long m = (secs % 3600) / 60;
     long long s = secs % 60;
     std::ostringstream ss;
-    if (h > 0)      ss << h << "j " << m << "m";
-    else if (m > 0) ss << m << "m";
-    else            ss << s << "d";
+    ss << std::setw(2) << std::setfill('0') << h << ":"
+       << std::setw(2) << std::setfill('0') << m << ":"
+       << std::setw(2) << std::setfill('0') << s;
     return ss.str();
 }
 
@@ -422,7 +423,7 @@ static void updateRelayStatus(uint16_t status) {
         std::string text = "CH" + std::to_string(ch);
         std::string tip;
         if (it != g_usage.end()) {
-            text += "\n" + it->second.nama;
+            text += "\n" + it->second.nim + "\n" + it->second.nama;
 
             time_t t0 = parseTimestamp(it->second.waktu_on);
             long long durSecs = (t0 != (time_t)-1)
@@ -668,12 +669,24 @@ static gboolean onEventIdle(gpointer user_data) {
                       " channel. Pastikan hardware memang punya channel sebanyak itu.");
         }
 
-        // Diagnostik saja (log metode baca yg direspons device untuk
-        // deteksi disconnect) -- TIDAK dipakai untuk menentukan status
-        // channel, karena tidak reliable di semua board (lihat catatan
-        // di relay_controller.cpp).
-        auto scanLogs = g_core->scanRelayStatus();
-        for (auto& l : scanLogs) appendLog(l);
+        // Scan diagnostik M0-M4 SENGAJA tidak dipanggil di sini lagi.
+        // Root cause loop connect/disconnect: kirim 5 request HID
+        // beruntun (get_feature_report x2, read, write+read x2) bikin
+        // sebagian board clone 16c0:05df crash/reset firmware-nya --
+        // device lepas dari bus, Windows kirim event removed, app
+        // auto-reconnect, scan jalan lagi, crash lagi (loop).
+        // Fungsi scanRelayStatus() di app_core/relay_controller tetap
+        // ada untuk debug manual, cukup tidak dipanggil otomatis tiap
+        // connect. m_status_method jadi tidak pernah ke-set -> getStatus()
+        // hanya kembalikan cache (m_last_status), tidak masalah karena
+        // status channel memang bukan dari situ (lihat komentar di
+        // relay_controller.cpp: acuan status tetap usage.csv).
+        appendLog("[*] Auto-scan status hardware dilewati (mencegah crash board).");
+
+        // Jeda settle: Windows perlu waktu sesaat setelah openDevice()
+        // sebelum HID pipe siap terima write. Tanpa ini, write pertama
+        // di reconcileRelayFromUsage() di bawah gampang gagal.
+        g_usleep(300000); // 300ms
 
         // Status channel yang benar-benar dipakai berasal dari usage.csv:
         // nyalakan ulang channel yang tercatat ON, pastikan sisanya OFF.

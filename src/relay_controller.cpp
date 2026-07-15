@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <algorithm>
 #include <cctype>
+#include <thread>
+#include <chrono>
 
 RelayController::RelayController() = default;
 RelayController::~RelayController() { closeDevice(); cleanup(); }
@@ -20,6 +22,17 @@ RelayController::~RelayController() { closeDevice(); cleanup(); }
 // fallback ke 1 channel (aman, tombolnya tetap bisa ditambah manual
 // via override kalau device ternyata >1 channel dan string-nya memang
 // tidak mengandung petunjuk apa pun).
+//
+// Batasan: heuristik ini hanya bisa membaca SATU digit (1-9) dari
+// string, jadi tidak bisa mendeteksi board 10-16 channel secara
+// otomatis dari nama/serial (mis. "RELAY16" akan salah kebaca sebagai
+// 1, karena hanya digit pertama setelah kata kunci yang diambil).
+// Ini TIDAK masalah untuk alur normal aplikasi: channel mana yang
+// benar-benar dipakai GUI ditentukan oleh config/channels.conf
+// (lihat gui_ui.cpp), bukan dari angka hasil tebakan di sini -- nilai
+// num_channels ini hanya dipakai RelayController::setAll() untuk
+// menghitung mask "semua channel". Kalau board kamu >9 channel, pakai
+// flag --channels N (lihat main.cpp) untuk override manual.
 // ---------------------------------------------------------------
 
 // Layer kuat: cari pola eksplisit "...relay<N>", "...lcus-<N>", "...ch<N>"
@@ -41,7 +54,7 @@ static int patternChannels(const std::string& text) {
             if (digitPos < text.size() && !std::isdigit((unsigned char)text[digitPos]))
                 digitPos++;
             if (digitPos < text.size() &&
-                text[digitPos] >= '1' && text[digitPos] <= '8') {
+                text[digitPos] >= '1' && text[digitPos] <= '9') {
                 return text[digitPos] - '0';
             }
             pos += kwLen;
@@ -56,7 +69,7 @@ static int patternChannels(const std::string& text) {
 // salah kalau kebetulan ada digit 1-8 yang tidak berarti apa-apa.
 static int lastDigitChannels(const std::string& text) {
     for (int i = (int)text.size() - 1; i >= 0; i--) {
-        if (text[i] >= '1' && text[i] <= '8') return text[i] - '0';
+        if (text[i] >= '1' && text[i] <= '9') return text[i] - '0';
     }
     return 0;
 }
@@ -315,6 +328,7 @@ bool RelayController::openDevice(const std::string& path) {
     }
     m_last_status  = 0;
     m_status_method = -1;
+    m_status_fail_count = 0;
     // scan dilakukan dari AppCore setelah openDevice agar hasilnya bisa di-log ke GUI
     return true;
 }
@@ -325,16 +339,32 @@ void RelayController::closeDevice() {
 
 bool RelayController::setChannel(int ch, bool on) {
     if (!m_device) return false;
+    // Channel yang didukung m_last_status (bitmask 16-bit) adalah 1-16 --
+    // lihat config/channels.conf. Byte 3 protokol HID sendiri (uint8_t)
+    // cukup lebar untuk itu, tapi kita tetap validasi di sini supaya
+    // shift bit di bawah tidak pernah keluar jangkauan uint16_t.
+    if (ch < 1 || ch > 16) return false;
     uint8_t buf[9] = {};
     buf[0] = 0x00;
     buf[1] = on ? 0xFF : 0xFD;
     buf[2] = static_cast<uint8_t>(ch);
-    bool ok = hid_write(m_device, buf, 9) == 9;
+    // Board 16c0:05df ini kontrolnya lewat FEATURE report (SET_REPORT),
+    // BUKAN interrupt OUTPUT report. Device tidak punya endpoint OUT --
+    // hid_write() (WriteFile ke pipe OUT) karena itu selalu gagal di
+    // Windows, walau hid_get_feature_report() (M0/M1) sukses baca.
+    // Linux hidraw kadang lolos writeke OUT meski endpoint tidak match,
+    // makanya gejala ini baru kentara di Windows.
+    bool ok = false;
+    for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+        if (attempt > 0) std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        ok = hid_send_feature_report(m_device, buf, 9) == 9;
+    }
     if (ok) {
+        uint16_t bit = static_cast<uint16_t>(1u << (ch - 1));
         if (on)
-            m_last_status |= static_cast<uint8_t>(1 << (ch - 1));
+            m_last_status |= bit;
         else
-            m_last_status &= static_cast<uint8_t>(~(1 << (ch - 1)));
+            m_last_status &= static_cast<uint16_t>(~bit);
     }
     return ok;
 }
@@ -345,17 +375,21 @@ bool RelayController::setAll(bool on) {
     buf[0] = 0x00;
     buf[1] = on ? 0xFF : 0xFD;
     buf[2] = 0x00;
-    bool ok = hid_write(m_device, buf, 9) == 9;
+    bool ok = false;
+    for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+        if (attempt > 0) std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        ok = hid_send_feature_report(m_device, buf, 9) == 9;
+    }
     if (ok) {
-        int n = (m_info.num_channels > 0 && m_info.num_channels <= 8)
-                ? m_info.num_channels : 8;
-        uint8_t mask = (n >= 8) ? 0xFF : static_cast<uint8_t>((1 << n) - 1);
-        m_last_status = on ? mask : 0x00;
+        int n = (m_info.num_channels > 0 && m_info.num_channels <= 16)
+                ? m_info.num_channels : 16;
+        uint16_t mask = (n >= 16) ? 0xFFFF : static_cast<uint16_t>((1u << n) - 1);
+        m_last_status = on ? mask : 0x0000;
     }
     return ok;
 }
 
-uint8_t RelayController::getStatus() {
+uint16_t RelayController::getStatus() {
     if (!m_device) return m_last_status;
 
     // ---------------------------------------------------------------
@@ -400,8 +434,16 @@ uint8_t RelayController::getStatus() {
     }
 
     if (res < 0) {
-        hid_close(m_device);
-        m_device = nullptr;
+        m_status_fail_count++;
+        if (m_status_fail_count >= kMaxStatusFails) {
+            hid_close(m_device);
+            m_device = nullptr;
+        }
+        // Kalau belum tembus batas, device TETAP dianggap terhubung --
+        // status channel (m_last_status) tidak diubah, cukup tunggu
+        // polling berikutnya.
+    } else {
+        m_status_fail_count = 0;
     }
 
     // res >= 0 berarti device masih merespons -> tetap terhubung.
@@ -410,4 +452,4 @@ uint8_t RelayController::getStatus() {
     return m_last_status;
 }
 
-void RelayController::setLastStatus(uint8_t s) { m_last_status = s; }
+void RelayController::setLastStatus(uint16_t s) { m_last_status = s; }
