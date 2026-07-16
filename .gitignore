@@ -1,2 +1,6 @@
-logs/**
+**/logs/**
+**/usage.csv
 usage.csv
+logs/**
+**/usbrelay-gui
+**/usbrelay-gui.exe
